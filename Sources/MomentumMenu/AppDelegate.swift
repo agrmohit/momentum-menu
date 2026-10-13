@@ -14,15 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        // Deliberately NOT a headphones glyph: macOS already shows one in the
-        // Sound menu bar item whenever headphones are the output device, and
-        // two identical glyphs side by side tell you nothing about which is
-        // which. The Sound item answers "where is audio going"; this one
-        // answers "what state are the headphones in", so it wears a controls
-        // glyph instead.
-        statusItem.button?.image = NSImage(systemSymbolName: "slider.horizontal.3",
-                                          accessibilityDescription: "MOMENTUM 4 controls")
-        statusItem.button?.imagePosition = .imageLeading
+        statusItem.button?.image = StatusIcon.image(batteryPercent: nil, connected: false)
+        statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
 
@@ -62,12 +55,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItem(_ state: DeviceState) {
         guard let button = statusItem.button else { return }
-        if state.connected, let battery = state.batteryPercent {
-            button.title = " \(battery)%"
-        } else {
-            button.title = ""
-        }
+
+        // The battery bar carries the level, so no percentage text: it would
+        // say the same thing twice and double the item's width, which matters
+        // on a crowded menu bar. The exact figure is in the popover and the
+        // tooltip.
+        button.image = StatusIcon.image(batteryPercent: state.batteryPercent,
+                                        connected: state.connected)
         button.appearsDisabled = !state.connected
+
+        if state.connected {
+            let battery = state.batteryPercent.map { "\($0)%" } ?? "battery unknown"
+            let mode = state.noiseMode?.rawValue ?? "unknown mode"
+            button.toolTip = "MOMENTUM 4 — \(battery), \(mode)"
+        } else {
+            button.toolTip = "MOMENTUM 4 — not connected"
+        }
     }
 
     @objc private func togglePopover() {

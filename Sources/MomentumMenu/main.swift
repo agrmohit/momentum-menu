@@ -5,6 +5,15 @@ import M4Core
 // `--probe` does a read-only pass over the headphones and prints what it
 // found. It sends no writes at all, which makes it the safe way to check that
 // the control channel works before trusting the UI with anything.
+// Development aid: render the menu bar icon large, at several charge levels,
+// on both a dark and a light background.
+if let index = CommandLine.arguments.firstIndex(of: "--icon-preview"),
+   index + 1 < CommandLine.arguments.count {
+    try StatusIcon.writePreview(to: CommandLine.arguments[index + 1])
+    print("wrote \(CommandLine.arguments[index + 1])")
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--probe") {
     // IOBluetooth delivers its callbacks on the run loop, so we need one even
     // for a command line pass.
