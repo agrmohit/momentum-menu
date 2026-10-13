@@ -30,8 +30,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>                     <string>MomentumMenu</string>
     <key>CFBundleDisplayName</key>              <string>Momentum Menu</string>
     <key>CFBundleIdentifier</key>               <string>local.momentummenu</string>
-    <key>CFBundleVersion</key>                  <string>1.0</string>
-    <key>CFBundleShortVersionString</key>       <string>1.0</string>
+    <!-- Must match the GitHub release tag: UpdateChecker compares the tag
+         (minus its leading v) against CFBundleShortVersionString. -->
+    <key>CFBundleVersion</key>                  <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>       <string>1.0.0</string>
     <key>CFBundleExecutable</key>               <string>MomentumMenu</string>
     <key>CFBundlePackageType</key>              <string>APPL</string>
     <key>LSMinimumSystemVersion</key>           <string>14.0</string>
