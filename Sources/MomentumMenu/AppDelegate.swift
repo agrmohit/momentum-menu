@@ -14,8 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "headphones",
-                                          accessibilityDescription: "MOMENTUM 4")
+        // Deliberately NOT a headphones glyph: macOS already shows one in the
+        // Sound menu bar item whenever headphones are the output device, and
+        // two identical glyphs side by side tell you nothing about which is
+        // which. The Sound item answers "where is audio going"; this one
+        // answers "what state are the headphones in", so it wears a controls
+        // glyph instead.
+        statusItem.button?.image = NSImage(systemSymbolName: "slider.horizontal.3",
+                                          accessibilityDescription: "MOMENTUM 4 controls")
         statusItem.button?.imagePosition = .imageLeading
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
