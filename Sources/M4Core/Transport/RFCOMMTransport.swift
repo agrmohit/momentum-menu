@@ -91,17 +91,21 @@ final class RFCOMMTransport: NSObject {
         return records
     }
 
-    func connect() throws {
+    /// - Parameter allowWake: whether we may bring the Bluetooth link up when
+    ///   the headphones are idle. Only ever true for an action the user just
+    ///   took. Background refreshes pass false, because `openConnection()`
+    ///   does not merely observe — it pulls the headphones onto this Mac, and
+    ///   with multipoint that means taking them away from whatever device the
+    ///   user just handed them to. An app that reads a battery percentage has
+    ///   no business doing that once a minute.
+    func connect(allowWake: Bool = false) throws {
         guard let target = Self.discoverCandidates().first else {
             throw TransportError.headphonesNotFound
         }
         device = target
 
-        // If the headphones are paired but idle, bring the baseband link up.
-        // They may be attached to a phone as well (the M4 does multipoint), so
-        // this can pull audio over to the Mac — which is what someone opening
-        // a Mac control app is asking for.
         if !target.isConnected() {
+            guard allowWake else { throw TransportError.notConnected }
             let status = target.openConnection()
             guard status == kIOReturnSuccess, target.isConnected() else {
                 throw TransportError.notConnected

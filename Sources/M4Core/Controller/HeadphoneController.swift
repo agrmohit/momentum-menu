@@ -110,7 +110,8 @@ public final class HeadphoneController: ObservableObject {
         }
         guard !state.connected else { return }
         do {
-            try transport.connect()
+            // Only a deliberate action may wake the headphones onto this Mac.
+            try transport.connect(allowWake: userInitiated)
             // The channel reports open asynchronously; give it a moment.
             try await Task.sleep(for: .milliseconds(400))
             state.connected = transport.isOpen
