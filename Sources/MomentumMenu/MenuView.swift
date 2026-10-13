@@ -40,9 +40,13 @@ struct MenuView: View {
                 Text(state.deviceName ?? "MOMENTUM 4")
                     .font(.headline)
                 if let battery = state.batteryPercent {
+                    // Deliberately not red: red reads as a fault, and a low
+                    // battery is a normal state, not a malfunction. Orange
+                    // draws the eye without implying something is broken, and
+                    // red stays reserved for actual errors.
                     Text("Battery \(battery)%")
                         .font(.caption)
-                        .foregroundStyle(battery <= 20 ? .red : .secondary)
+                        .foregroundStyle(battery <= 20 ? .orange : .secondary)
                 } else if state.connected {
                     Text("Battery unknown").font(.caption).foregroundStyle(.secondary)
                 }
