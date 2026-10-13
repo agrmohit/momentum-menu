@@ -23,14 +23,29 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 | Feature | State |
 | --- | --- |
 | Battery level | works |
+| Charging indicator | works — **only while connected**, see below |
 | Noise control mode (Off / Adaptive / Custom) | works |
 | Noise level slider (ANC ↔ transparency) | works |
 | Touch-control state (read) | works |
-| Disconnect (frees a multipoint slot) | works |
-| Settings: launch at login, hide icon, update checks | works |
 | Firmware version | works |
 | Equaliser (5-band, presets) | works — **needs headphone firmware 3.x** |
 | Bass boost | works — **needs headphone firmware 3.x** |
+| Disconnect (frees a multipoint slot) | works |
+| Settings: launch at login, hide icon, update checks | works |
+
+Verified against a MOMENTUM 4 Wireless on firmware 3.38.3, and previously on
+2.13.42.
+
+### Charging is announced, never asked
+
+The headphones push `0x0682` when the cable goes in or out, and there is no
+getter for it — probing found none, and the ids that might have been one live
+in the `0x06xx` power group that must not be swept. So the charging indicator
+only appears once the cable state *changes* while the app is connected. Plug in
+before launching and it will not know until you unplug.
+
+That is why the icon shows charging as a slow pulse rather than a bolt: a bolt
+at 2.5pt tall is an unreadable smudge, and motion survives the size.
 
 ### The firmware 3.x gate
 
@@ -54,7 +69,17 @@ update the headphones.
 ## Using it
 
 Left click the menu bar icon for battery, noise control and the equaliser.
-Right click for Settings, update checks and Exit.
+Right click for Settings, update checks and Exit App.
+
+The icon is a headphones glyph over a battery bar — deliberately not a bare
+headphones glyph, which is what macOS already shows in its own Sound item
+whenever headphones are the output device. The bar sweeps while connecting
+(which can take a few seconds) and pulses while charging.
+
+Equaliser presets are up front; the five parametric band sliders are one click
+deep under **Advanced Audio Settings**, since per-band gains are not what a
+menu bar is for. Gain limits come from the device: a MOMENTUM 4 on 3.38.3
+allows ±6.0 dB.
 
 **Disconnect** drops this Mac's Bluetooth link entirely, rather than just the
 control channel, so one of the headphones' two multipoint slots is freed for

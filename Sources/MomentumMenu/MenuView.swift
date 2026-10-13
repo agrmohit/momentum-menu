@@ -45,9 +45,10 @@ struct MenuView: View {
                     // battery is a normal state, not a malfunction. Orange
                     // draws the eye without implying something is broken, and
                     // red stays reserved for actual errors.
-                    Text("Battery \(battery)%")
+                    Text("Battery \(battery)%" + (state.isCharging == true ? " · Charging" : ""))
                         .font(.caption)
-                        .foregroundStyle(battery <= 20 ? .orange : .secondary)
+                        .foregroundStyle(state.isCharging == true ? .green
+                                         : (battery <= 20 ? .orange : .secondary))
                 } else if state.connected {
                     Text("Battery unknown").font(.caption).foregroundStyle(.secondary)
                 }
@@ -198,11 +199,15 @@ struct MenuView: View {
                         .foregroundStyle(.secondary)
                 }
                 .disclosureGroupStyle(.automatic)
+                // The popover resizes to fit; animating the content as well
+                // means two things moving at once.
+                .animation(nil, value: showAdvanced)
             }
         }
     }
 
     private var bandSliders: some View {
+        // Keyed on the whole curve, so a preset slides every band together.
         VStack(alignment: .leading, spacing: 6) {
             ForEach(state.bands) { band in
                 HStack(spacing: 8) {
@@ -226,6 +231,7 @@ struct MenuView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: state.bands.map(\.gainDb))
     }
 
     // MARK: - Footer

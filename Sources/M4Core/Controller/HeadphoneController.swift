@@ -57,6 +57,9 @@ public struct DeviceState: Sendable {
     public var deviceName: String?
     public var batteryPercent: Int?
     public var noiseMode: NoiseMode?
+    /// nil means unknown rather than "not charging": the device only announces
+    /// this when the cable changes, and offers no way to ask.
+    public var isCharging: Bool?
     /// 0 = full ANC ... 100 = full transparency
     public var noiseLevel: Int?
     public var bassBoost: Bool?
@@ -303,10 +306,34 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
+    /// Applies a whole curve.
+    ///
+    /// The device takes one band per command, so the writes are sequential —
+    /// but the displayed curve is updated in one go first. Updating it as each
+    /// write lands made the sliders step across the popover one at a time,
+    /// which looks like five separate changes rather than one preset.
     public func apply(_ preset: EqPreset) async {
-        for (index, gain) in preset.gains.enumerated() where index < state.bands.count {
-            await setBandGain(band: index, db: gain)
+        let targets = preset.gains.prefix(state.bands.count).map {
+            max(state.eqMinGainDb, min(state.eqMaxGainDb, $0))
         }
+
+        for (index, gain) in targets.enumerated() {
+            state.bands[index].gainDb = gain
+        }
+
+        for (index, gain) in targets.enumerated() {
+            do {
+                _ = try await request(Cmd.setBandGain,
+                                      payload: [UInt8(index), Gain.encode(db: gain)])
+            } catch {
+                // The shown curve is now a promise we failed to keep, so take
+                // the device's word for it rather than leaving a lie on screen.
+                state.lastError = error.localizedDescription
+                await refreshEqualiser()
+                return
+            }
+        }
+        state.lastError = nil
     }
 
     public func setBassBoost(_ enabled: Bool) async {
@@ -416,6 +443,17 @@ public final class HeadphoneController: ObservableObject {
             if let value = frame.payload.first { state.noiseLevel = Int(value) }
         case Cmd.getAncEnabled:
             if let value = frame.payload.first, value == 0 { state.noiseMode = .off }
+        case Cmd.chargingNotification:
+            if let value = frame.payload.first {
+                state.isCharging = value != 0
+                // Charge moves while plugged in, so stop showing a stale figure.
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    guard let self, self.state.connected else { return }
+                    self.state.batteryPercent =
+                        (try? await self.request(Cmd.getBattery).first).map { Int($0) }
+                }
+            }
         default:
             break
         }

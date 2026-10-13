@@ -46,10 +46,11 @@ enum StatusIcon {
     ///   several seconds, and a still, dim icon is indistinguishable from "no
     ///   headphones here" — which is precisely the wrong thing to say while
     ///   we are in the middle of reaching them.
-    static func image(batteryPercent: Int?, connected: Bool, connectingPhase: Double? = nil) -> NSImage {
+    static func image(batteryPercent: Int?, connected: Bool,
+                      connectingPhase: Double? = nil, chargingPhase: Double? = nil) -> NSImage {
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
             render(batteryPercent: batteryPercent, connected: connected,
-                   tint: .black, connectingPhase: connectingPhase)
+                   tint: .black, connectingPhase: connectingPhase, chargingPhase: chargingPhase)
             return true
         }
         image.isTemplate = true
@@ -57,7 +58,7 @@ enum StatusIcon {
     }
 
     private static func render(batteryPercent: Int?, connected: Bool, tint: NSColor,
-                               connectingPhase: Double? = nil) {
+                               connectingPhase: Double? = nil, chargingPhase: Double? = nil) {
         // Headphones, centred along the top.
         if let symbol = headphones(tint: tint) {
             let size = symbol.size
@@ -94,7 +95,16 @@ enum StatusIcon {
         // Never narrower than the pill is tall, so a nearly flat battery still
         // reads as a dot rather than vanishing.
         let filledWidth = max(barHeight, (barWidth * fraction).rounded())
-        tint.setFill()
+
+        // Charging breathes. A bolt would be the obvious choice, but at 2.5pt
+        // tall it is an unreadable smudge; motion survives the size where a
+        // glyph does not.
+        if let phase = chargingPhase {
+            let pulse = 0.55 + 0.45 * (0.5 + 0.5 * sin(phase * 2 * .pi))
+            tint.withAlphaComponent(pulse).setFill()
+        } else {
+            tint.setFill()
+        }
         NSBezierPath(roundedRect: NSRect(x: track.minX, y: track.minY,
                                          width: filledWidth, height: barHeight),
                      xRadius: barHeight / 2, yRadius: barHeight / 2).fill()

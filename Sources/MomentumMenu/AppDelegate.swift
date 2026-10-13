@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         // No fixed contentSize: the popover grows and shrinks with its content,
         // so expanding Advanced Audio Settings is not clipped.
+        //
+        // animates = false is deliberate. With it on, AppKit slides the whole
+        // popover as the content height changes, which reads as the box
+        // lurching up and down rather than a section opening. Resizing
+        // instantly and letting SwiftUI animate the disclosure inside is the
+        // calmer of the two.
+        popover.animates = false
         popover.contentViewController = NSHostingController(rootView: MenuView(controller: controller))
 
         controller.$state
@@ -97,15 +104,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusItem(_ state: DeviceState) {
         guard let button = statusItem.button else { return }
 
-        if state.isConnecting { startConnectingAnimation() } else { stopConnectingAnimation() }
+        if state.isConnecting {
+            startPulse(interval: 1.0 / 12, step: 0.07)
+        } else if state.isCharging == true, state.connected {
+            startPulse(interval: 1.0 / 10, step: 0.02)   // slower: breathing, not racing
+        } else {
+            stopPulse()
+        }
 
         // The battery bar carries the level, so no percentage text: it would
         // say the same thing twice and double the item's width, which matters
         // on a crowded menu bar. The exact figure is in the popover and the
         // tooltip.
-        button.image = StatusIcon.image(batteryPercent: state.batteryPercent,
-                                        connected: state.connected,
-                                        connectingPhase: state.isConnecting ? connectingPhase : nil)
+        button.image = StatusIcon.image(
+            batteryPercent: state.batteryPercent,
+            connected: state.connected,
+            connectingPhase: state.isConnecting ? connectingPhase : nil,
+            chargingPhase: (state.isCharging == true && state.connected) ? connectingPhase : nil)
         // Not dimmed while connecting: the sweep should be visible.
         button.appearsDisabled = !state.connected && !state.isConnecting
 
@@ -114,7 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if state.connected {
             let battery = state.batteryPercent.map { "\($0)%" } ?? "battery unknown"
             let mode = state.noiseMode?.rawValue ?? "unknown mode"
-            button.toolTip = "MOMENTUM 4 — \(battery), \(mode)"
+            let charging = state.isCharging == true ? ", charging" : ""
+            button.toolTip = "MOMENTUM 4 — \(battery)\(charging), \(mode)"
         } else if state.releasedByUser {
             button.toolTip = "MOMENTUM 4 — handed over to another device"
         } else {
@@ -122,19 +138,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startConnectingAnimation() {
+    /// Drives both the connecting sweep and the charging breath; which one is
+    /// drawn is decided when the image is built.
+    private func startPulse(interval: TimeInterval, step: Double) {
         guard connectingTimer == nil else { return }
-        connectingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12, repeats: true) { [weak self] _ in
+        connectingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let button = self.statusItem.button else { return }
-                self.connectingPhase += 0.07
-                button.image = StatusIcon.image(batteryPercent: nil, connected: false,
-                                                connectingPhase: self.connectingPhase)
+                self.connectingPhase += step
+                let state = self.controller.state
+                button.image = StatusIcon.image(
+                    batteryPercent: state.batteryPercent,
+                    connected: state.connected,
+                    connectingPhase: state.isConnecting ? self.connectingPhase : nil,
+                    chargingPhase: (state.isCharging == true && state.connected)
+                        ? self.connectingPhase : nil)
             }
         }
     }
 
-    private func stopConnectingAnimation() {
+    private func stopPulse() {
         connectingTimer?.invalidate()
         connectingTimer = nil
         connectingPhase = 0

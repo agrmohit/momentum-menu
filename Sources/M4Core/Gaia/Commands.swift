@@ -15,6 +15,15 @@ enum Cmd {
     /// -> [] ; <- [percent]. Keeps answering while charging.
     static let getBattery: UInt16 = 0x0603
 
+    /// Push only, as 0x0682: [1] when the cable goes in, [0] when it comes out.
+    /// Reported by the headphones themselves, so a wall charger counts.
+    ///
+    /// There is no getter. Probing found none, and the ids that might have been
+    /// one sit in the 0x06xx power group that must not be swept. So charging is
+    /// observable but not pollable: until the cable state changes while we are
+    /// connected, we genuinely do not know it.
+    static let chargingNotification: UInt16 = 0x0602
+
     // Noise control -----------------------------------------------------
     /// -> [] ; <- [0/1]. The "Off" leg of the app's three-way control.
     static let getAncEnabled: UInt16 = 0x1A05
