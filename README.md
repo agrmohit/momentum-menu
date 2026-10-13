@@ -20,6 +20,36 @@ is an independent, interoperable client for headphones you already own.
 > from community reverse-engineering plus verification against real hardware.
 > It can misbehave on firmware it has not seen. Use it at your own risk.
 
+## Quick setup
+
+```sh
+brew install --cask --no-quarantine andr3-santos/momentum-menu/momentum-menu
+open -a MomentumMenu
+```
+
+`--no-quarantine` is not optional. The app is ad-hoc signed rather than
+notarised with a paid Apple Developer account, so macOS quarantines it on
+download and refuses to open it. The flag tells Homebrew not to attach that
+quarantine flag in the first place. Without it you would have to run
+`xattr -dr com.apple.quarantine /Applications/MomentumMenu.app` afterwards.
+
+Or build it yourself, which takes a few seconds and sidesteps Gatekeeper
+entirely, because software you compile locally is never quarantined:
+
+```sh
+git clone https://github.com/andr3-santos/momentum-menu.git
+cd momentum-menu && ./build.sh release install
+open -a MomentumMenu
+```
+
+That needs macOS 14+ and Xcode's Swift toolchain, and installs to
+`~/Applications`. macOS asks for Bluetooth permission on first launch.
+
+> [!NOTE]
+> Pick one or the other. Homebrew installs to `/Applications` and `build.sh`
+> to `~/Applications`; having both leaves two bundles with the same identifier
+> and `open -a MomentumMenu` will pick whichever Launch Services prefers.
+
 ## Status
 
 Verified against a MOMENTUM 4 Wireless on this Mac:
@@ -165,41 +195,7 @@ usage description, the process is killed on its first Bluetooth call.
 The app is ad-hoc signed. On first launch macOS will ask for Bluetooth
 permission, and Gatekeeper may need a right-click → Open.
 
-## How it works
-
-The headphones expose a Qualcomm **GAIA v3** control channel over Bluetooth
-Classic RFCOMM, under the SDP service UUID
-`A2129FF3-081B-4C45-8AFE-469D9C4842EC`. Frames look like this:
-
-```
-FF 03 | length(u16 BE) | vendor(u16 BE) | command(u16 BE) | payload
-                          0x0495 = Sennheiser
-```
-
-Responses reuse the request id with status bits laid over it: `| 0x0100`
-success, `| 0x0180` error, `| 0x0080` unsolicited notification.
-
-### SDP is a hint, not ground truth
-
-Firmware 3.38.3 advertises a single GAIA record pointing at **RFCOMM channel
-2**, and nothing answers there — opening it never completes. GAIA is on
-**channel 1**. Earlier firmware advertised both channels, which is why trusting
-the advertised number used to work.
-
-So the app treats the advertised channel as a first guess, falls back to the
-channels GAIA has been seen on, and then *verifies* the channel by asking for
-the battery level and waiting for a well-formed reply. Opening is not proof on
-its own: this device has another RFCOMM service on channel 14 that opens
-happily and does not speak GAIA.
-
-The equaliser's gain limits come from `0x1000` for the same reason — the
-encoding could carry ±12.7 dB, but a MOMENTUM 4 on 3.38.3 reports ±6.0 dB.
-
-This is why the app can exist on macOS but not on iOS. Raw RFCOMM to a
-non-MFi accessory is available through `IOBluetooth` on macOS, and simply not
-available to third-party iOS apps at all.
-
-### Project layout
+## Project layout
 
 ```
 Sources/M4Core/Gaia/          frame codec, command ids, safety blocklist
