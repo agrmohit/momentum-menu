@@ -51,9 +51,32 @@ codesign --force --sign - --timestamp=none "$APP"
 
 echo
 echo "Built $APP"
+
+# `./build.sh release install` puts it in ~/Applications so it can be launched
+# by name, and survives this checkout moving around.
+if [ "${2:-}" = "install" ]; then
+    DEST="$HOME/Applications/MomentumMenu.app"
+    echo "==> Installing to $DEST"
+    pkill -f "MomentumMenu" 2>/dev/null || true
+    mkdir -p "$HOME/Applications"
+    rm -rf "$DEST"
+    cp -R "$APP" "$DEST"
+    echo
+    echo "Installed. Launch it with:"
+    echo "  open -a MomentumMenu"
+    echo
+    echo "macOS may ask for Bluetooth permission again: the app is ad-hoc"
+    echo "signed, so a new location reads as a new identity to TCC."
+    exit 0
+fi
+
 echo
-echo "Read-only check (sends no writes):"
-echo "  $APP/Contents/MacOS/MomentumMenu --probe"
+echo "Read-only check (sends no writes). Launch via 'open' so that macOS"
+echo "attributes the Bluetooth request to the app and not to your shell:"
+echo "  open -W --stdout /dev/stdout $APP --args --probe --diagnose"
 echo
 echo "Run the menu bar app:"
 echo "  open $APP"
+echo
+echo "Install to ~/Applications so it launches by name:"
+echo "  ./build.sh release install"

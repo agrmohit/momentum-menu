@@ -69,10 +69,11 @@ for by other people's hardware.
 ## Build
 
 ```bash
-./build.sh
+./build.sh                  # produces build/MomentumMenu.app
+./build.sh release install  # and copies it to ~/Applications
 ```
 
-That produces `build/MomentumMenu.app`. Then:
+Once installed it launches by name with `open -a MomentumMenu`. Otherwise:
 
 ```bash
 # read-only check: reads state, writes nothing
