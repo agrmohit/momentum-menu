@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         if state.isConnecting {
             startPulse(interval: 1.0 / 12, step: 0.07)
-        } else if state.isCharging == true, state.connected {
+        } else if state.isCharging == true, state.connected, !state.isFullyCharged {
             startPulse(interval: 1.0 / 10, step: 0.02)   // slower: breathing, not racing
         } else {
             stopPulse()
@@ -133,7 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             batteryPercent: state.batteryPercent,
             connected: state.connected,
             connectingPhase: state.isConnecting ? connectingPhase : nil,
-            chargingPhase: (state.isCharging == true && state.connected) ? connectingPhase : nil)
+            // A full battery stops pulsing: the bar sits solid at 100%.
+            chargingPhase: (state.isCharging == true && state.connected && !state.isFullyCharged)
+                ? connectingPhase : nil)
         // Not dimmed while connecting: the sweep should be visible.
         button.appearsDisabled = !state.connected && !state.isConnecting
 
@@ -142,8 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } else if state.connected {
             let battery = state.batteryPercent.map { "\($0)%" } ?? "battery unknown"
             let mode = state.noiseMode?.rawValue ?? "unknown mode"
-            let charging = state.isCharging == true ? ", charging" : ""
-            button.toolTip = "MOMENTUM 4 — \(battery)\(charging), \(mode)"
+            let charge = state.chargeLabel.map { ", \($0.lowercased())" } ?? ""
+            button.toolTip = "MOMENTUM 4 — \(battery)\(charge), \(mode)"
         } else if state.releasedByUser {
             button.toolTip = "MOMENTUM 4 — handed over to another device"
         } else {
@@ -164,7 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     batteryPercent: state.batteryPercent,
                     connected: state.connected,
                     connectingPhase: state.isConnecting ? self.connectingPhase : nil,
-                    chargingPhase: (state.isCharging == true && state.connected)
+                    chargingPhase: (state.isCharging == true && state.connected
+                                    && !state.isFullyCharged)
                         ? self.connectingPhase : nil)
             }
         }

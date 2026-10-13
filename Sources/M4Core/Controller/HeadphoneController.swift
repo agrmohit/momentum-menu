@@ -79,6 +79,18 @@ public struct DeviceState: Sendable {
     public var releasedByUser = false
     public var lastError: String?
 
+    /// Plugged in and full. Worth distinguishing: "Charging" at 100% reads as
+    /// something still being done.
+    public var isFullyCharged: Bool {
+        isCharging == true && (batteryPercent ?? 0) >= 100
+    }
+
+    /// "Charging", "Charged", or nothing at all when running on battery.
+    public var chargeLabel: String? {
+        guard isCharging == true else { return nil }
+        return isFullyCharged ? "Charged" : "Charging"
+    }
+
     /// True when the device is running firmware old enough to lack the
     /// equaliser entirely.
     public var needsFirmwareUpdateForEq: Bool {
@@ -584,7 +596,8 @@ public final class HeadphoneController: ObservableObject {
         var lines: [String] = []
         lines.append("Device:   \(state.deviceName ?? "unknown")")
         lines.append("Firmware: \(state.firmware ?? "unknown")")
-        lines.append("Battery:  \(state.batteryPercent.map { "\($0)%" } ?? "unknown")")
+        let charge = state.chargeLabel.map { " (\($0.lowercased()))" } ?? ""
+        lines.append("Battery:  \(state.batteryPercent.map { "\($0)%" } ?? "unknown")\(charge)")
         lines.append("Noise:    \(state.noiseMode?.rawValue ?? "unknown") at level \(state.noiseLevel.map(String.init) ?? "?")")
         lines.append("Bass:     \(state.bassBoost.map { $0 ? "on" : "off" } ?? "not on this firmware (needs 3.x)")")
         if state.bands.isEmpty {

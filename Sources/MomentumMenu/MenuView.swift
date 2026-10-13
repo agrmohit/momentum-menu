@@ -82,7 +82,7 @@ struct MenuView: View {
                     // battery is a normal state, not a malfunction. Orange
                     // draws the eye without implying something is broken, and
                     // red stays reserved for actual errors.
-                    Text("Battery \(battery)%" + (state.isCharging == true ? " · Charging" : ""))
+                    Text("Battery \(battery)%" + (state.chargeLabel.map { " · \($0)" } ?? ""))
                         .font(.caption)
                         .foregroundStyle(state.isCharging == true ? .green
                                          : (battery <= 20 ? .orange : .secondary))
