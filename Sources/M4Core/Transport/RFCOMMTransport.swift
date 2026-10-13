@@ -54,6 +54,13 @@ final class RFCOMMTransport: NSObject {
     private var channel: IOBluetoothRFCOMMChannel?
     private var device: IOBluetoothDevice?
     private var inbound: [UInt8] = []
+    /// Resumed by rfcommChannelOpenComplete, or by the timeout, whichever
+    /// comes first. Cleared before resuming so it can only fire once.
+    private var openContinuation: CheckedContinuation<IOReturn, Never>?
+    private var sdpContinuation: CheckedContinuation<Void, Never>?
+    private var lastOpenStatus: IOReturn = kIOReturnError
+    /// Which RFCOMM channel the control session actually ended up on.
+    private(set) var openedChannelID: BluetoothRFCOMMChannelID?
 
     /// Called for every decoded frame, on the main thread.
     var onFrame: ((GaiaFrame) -> Void)?
@@ -98,7 +105,7 @@ final class RFCOMMTransport: NSObject {
     ///   with multipoint that means taking them away from whatever device the
     ///   user just handed them to. An app that reads a battery percentage has
     ///   no business doing that once a minute.
-    func connect(allowWake: Bool = false) throws {
+    func connect(allowWake: Bool = false) async throws {
         guard let target = Self.discoverCandidates().first else {
             throw TransportError.headphonesNotFound
         }
@@ -112,23 +119,125 @@ final class RFCOMMTransport: NSObject {
             }
         }
 
-        let records = Self.gaiaRecords(on: target)
-        guard !records.isEmpty else { throw TransportError.gaiaServiceMissing }
+        // First pass uses whatever macOS has cached, which is the fast path.
+        if try await openGaiaChannel(on: target) { return }
 
-        var lastStatus: IOReturn = kIOReturnError
-        for record in records {
-            var channelID: BluetoothRFCOMMChannelID = 0
-            guard record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess else { continue }
+        // Failing that, the cache may predate a firmware update: if the
+        // headphones moved their GAIA service to a different RFCOMM channel,
+        // we would be opening one that no longer exists and waiting forever
+        // for a completion that never comes. Ask the device directly and retry.
+        await refreshServiceRecords(on: target)
+        if try await openGaiaChannel(on: target) { return }
 
-            var opened: IOBluetoothRFCOMMChannel?
-            let status = target.openRFCOMMChannelAsync(&opened, withChannelID: channelID, delegate: self)
-            if status == kIOReturnSuccess, let opened {
-                channel = opened
+        throw TransportError.channelOpenFailed(lastOpenStatus)
+    }
+
+    /// Re-queries the device's SDP records rather than trusting the cache.
+    private func refreshServiceRecords(on device: IOBluetoothDevice) async {
+        await withCheckedContinuation { continuation in
+            sdpContinuation = continuation
+            if device.performSDPQuery(self) != kIOReturnSuccess {
+                sdpContinuation = nil
+                continuation.resume()
                 return
             }
-            lastStatus = status
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                guard let self, let pending = self.sdpContinuation else { return }
+                self.sdpContinuation = nil
+                pending.resume()
+            }
         }
-        throw TransportError.channelOpenFailed(lastStatus)
+    }
+
+    /// Channels GAIA has been seen on, tried after whatever SDP advertises.
+    private static let fallbackChannels: [BluetoothRFCOMMChannelID] = [1, 2]
+
+    /// Tries each candidate channel until one opens *and* answers GAIA.
+    ///
+    /// SDP is a hint here, not ground truth. A firmware update moved this
+    /// device's GAIA endpoint from channel 2 to channel 1 while leaving the
+    /// record pointing at 2, so trusting the advertised number alone meant
+    /// hanging forever on a channel nothing was listening to. Other channels
+    /// open happily without speaking GAIA, so opening is not proof either —
+    /// hence the handshake.
+    private func openGaiaChannel(on target: IOBluetoothDevice) async throws -> Bool {
+        var candidates: [BluetoothRFCOMMChannelID] = []
+        for record in Self.gaiaRecords(on: target) {
+            var channelID: BluetoothRFCOMMChannelID = 0
+            if record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess {
+                candidates.append(channelID)
+            }
+        }
+        for fallback in Self.fallbackChannels where !candidates.contains(fallback) {
+            candidates.append(fallback)
+        }
+        guard !candidates.isEmpty else { throw TransportError.gaiaServiceMissing }
+
+        for channelID in candidates {
+            var opened: IOBluetoothRFCOMMChannel?
+            let status = target.openRFCOMMChannelAsync(&opened, withChannelID: channelID, delegate: self)
+            guard status == kIOReturnSuccess, let opened else {
+                lastOpenStatus = status
+                continue
+            }
+            channel = opened
+
+            // openRFCOMMChannelAsync returning success only means the request
+            // was accepted; whether it opened arrives later via
+            // rfcommChannelOpenComplete. Sleeping a fixed interval and checking
+            // isOpen() instead is a race the old firmware happened to win.
+            let result = await awaitOpenComplete(timeoutSeconds: 8)
+            if result == kIOReturnSuccess, opened.isOpen(), await speaksGaia() {
+                openedChannelID = channelID
+                return true
+            }
+
+            lastOpenStatus = result == kIOReturnSuccess ? kIOReturnNotFound : result
+            opened.setDelegate(nil)
+            opened.close()
+            channel = nil
+        }
+        return false
+    }
+
+    /// Asks for the battery level and waits for a well-formed GAIA answer.
+    /// Harmless, and the cheapest proof that this channel is the control one.
+    private func speaksGaia() async -> Bool {
+        let saved = onFrame
+        defer { onFrame = saved }
+
+        return await withCheckedContinuation { continuation in
+            var settled = false
+            onFrame = { frame in
+                guard !settled, frame.baseCommand == Cmd.getBattery,
+                      frame.responseKind != nil else { return }
+                settled = true
+                continuation.resume(returning: true)
+            }
+            do {
+                try send(GaiaFrame(command: Cmd.getBattery))
+            } catch {
+                settled = true
+                continuation.resume(returning: false)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard !settled else { return }
+                settled = true
+                continuation.resume(returning: false)
+            }
+        }
+    }
+
+    private func awaitOpenComplete(timeoutSeconds: Double) async -> IOReturn {
+        await withCheckedContinuation { continuation in
+            openContinuation = continuation
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeoutSeconds) { [weak self] in
+                guard let self, let pending = self.openContinuation else { return }
+                self.openContinuation = nil
+                pending.resume(returning: kIOReturnTimeout)
+            }
+        }
     }
 
     func disconnect() {
@@ -140,6 +249,70 @@ final class RFCOMMTransport: NSObject {
         // channel, so that is all we close.
         device = nil
         inbound.removeAll()
+    }
+
+    /// Dumps what macOS currently knows about every paired device, so a
+    /// failure to find the headphones can be told apart from a failure to open
+    /// their control channel. Read-only.
+    static func inventory() -> String {
+        guard let paired = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] else {
+            return "macOS returned no paired-device list at all."
+        }
+        let uuid = sdpUUID()
+        var lines = ["Paired devices: \(paired.count)"]
+        for device in paired {
+            lines.append("• \(device.name ?? "(unnamed)")  [\(device.addressString ?? "?")]  "
+                         + "connected=\(device.isConnected())")
+            guard let records = device.services as? [IOBluetoothSDPServiceRecord], !records.isEmpty else {
+                lines.append("      no SDP records cached")
+                continue
+            }
+            for record in records {
+                var channel: BluetoothRFCOMMChannelID = 0
+                let hasChannel = record.getRFCOMMChannelID(&channel) == kIOReturnSuccess
+                let isGaia = record.matchesUUIDArray([uuid])
+                lines.append("      - \(record.getServiceName() ?? "(unnamed service)")"
+                             + (hasChannel ? "  rfcomm=\(channel)" : "")
+                             + (isGaia ? "   <<< GAIA >>>" : ""))
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Tries to open specific RFCOMM channels and reports what happened to
+    /// each, to tell "the service moved" apart from "the device refuses us".
+    ///
+    /// Deliberately does not touch channel 10: that is Hands-Free, and opening
+    /// it could disturb call audio. Sends no GAIA commands — it opens the
+    /// channel, waits for the completion, and closes it again.
+    func probeChannels(_ channels: [BluetoothRFCOMMChannelID]) async -> String {
+        guard let target = Self.discoverCandidates().first else {
+            return "No paired device advertising GAIA."
+        }
+        guard target.isConnected() else { return "\(target.name ?? "device") is not connected." }
+
+        var lines = ["Channel open attempts on \(target.name ?? "device"):"]
+        for id in channels {
+            var opened: IOBluetoothRFCOMMChannel?
+            let request = target.openRFCOMMChannelAsync(&opened, withChannelID: id, delegate: self)
+            guard request == kIOReturnSuccess, let opened else {
+                lines.append("  channel \(id): request refused (IOReturn \(request))")
+                continue
+            }
+            let result = await awaitOpenComplete(timeoutSeconds: 6)
+            let verdict: String
+            switch result {
+            case kIOReturnSuccess where opened.isOpen(): verdict = "OPENED"
+            case kIOReturnSuccess: verdict = "completed but not open"
+            case kIOReturnTimeout: verdict = "no completion within 6s"
+            default: verdict = "failed (IOReturn \(result))"
+            }
+            lines.append("  channel \(id): \(verdict)")
+            opened.setDelegate(nil)
+            opened.close()
+        }
+        channel = nil
+        return lines.joined(separator: "\n")
     }
 
     /// Drops the entire Bluetooth link, not just the control channel.
@@ -188,6 +361,19 @@ extension RFCOMMTransport: IOBluetoothRFCOMMChannelDelegate {
         while let frame = GaiaFrame.decode(consuming: &inbound) {
             onFrame?(frame)
         }
+    }
+
+    /// Target callback for performSDPQuery.
+    @objc func sdpQueryComplete(_ device: IOBluetoothDevice!, status: IOReturn) {
+        guard let pending = sdpContinuation else { return }
+        sdpContinuation = nil
+        pending.resume()
+    }
+
+    func rfcommChannelOpenComplete(_ rfcommChannel: IOBluetoothRFCOMMChannel!, status error: IOReturn) {
+        guard let pending = openContinuation else { return }
+        openContinuation = nil
+        pending.resume(returning: error)
     }
 
     func rfcommChannelClosed(_ rfcommChannel: IOBluetoothRFCOMMChannel!) {

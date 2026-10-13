@@ -28,15 +28,28 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 | Touch-control state (read) | works |
 | Disconnect (frees a multipoint slot) | works |
 | Settings: launch at login, hide icon, update checks | works |
-| Equaliser | **not yet working** — see below |
-| Bass boost | **not yet working** — see below |
-| Firmware version | **not yet working** — see below |
+| Firmware version | works |
+| Equaliser (5-band, presets) | works — **needs headphone firmware 3.x** |
+| Bass boost | works — **needs headphone firmware 3.x** |
 
-The equaliser, bass boost and firmware reads currently come back rejected with
-error `0x05` (malformed or wrong length). On this device that error is
-ambiguous: it means either "unsupported" or "this getter needs an argument and
-you sent an empty payload". `--probe --diagnose` asks each id both ways to tell
-those apart. Resolving this is the next piece of work.
+### The firmware 3.x gate
+
+The parametric equaliser and bass boost were added in headphone firmware 3.x.
+On 2.x the device rejects those command ids outright, and nothing a host sends
+can work around it — the commands do not exist there yet. This was settled by
+asking the hardware rather than guessing: on a unit running 2.13.42, `0x1000`
+and `0x1003` are rejected with `0x05` whether sent empty or with an argument
+byte, and `0x1009` (bass boost) answers `0x01`.
+
+That matters because `0x05` is ambiguous on this device: it means *either*
+"unsupported" *or* "this getter needs an argument and you sent none" — some ids
+really do answer only when given a dummy byte. `--probe --diagnose` sends each
+one both ways so the two cases can be told apart.
+
+The app reads the firmware version at connect and gates the feature on it, so
+on 2.x the equaliser section explains what is needed and names your installed
+version, and on 3.x it populates itself. No app update is required when you
+update the headphones.
 
 ## Using it
 
@@ -124,6 +137,22 @@ FF 03 | length(u16 BE) | vendor(u16 BE) | command(u16 BE) | payload
 
 Responses reuse the request id with status bits laid over it: `| 0x0100`
 success, `| 0x0180` error, `| 0x0080` unsolicited notification.
+
+### SDP is a hint, not ground truth
+
+Firmware 3.38.3 advertises a single GAIA record pointing at **RFCOMM channel
+2**, and nothing answers there — opening it never completes. GAIA is on
+**channel 1**. Earlier firmware advertised both channels, which is why trusting
+the advertised number used to work.
+
+So the app treats the advertised channel as a first guess, falls back to the
+channels GAIA has been seen on, and then *verifies* the channel by asking for
+the battery level and waiting for a well-formed reply. Opening is not proof on
+its own: this device has another RFCOMM service on channel 14 that opens
+happily and does not speak GAIA.
+
+The equaliser's gain limits come from `0x1000` for the same reason — the
+encoding could carry ±12.7 dB, but a MOMENTUM 4 on 3.38.3 reports ±6.0 dB.
 
 This is why the app can exist on macOS but not on iOS. Raw RFCOMM to a
 non-MFi accessory is available through `IOBluetooth` on macOS, and simply not

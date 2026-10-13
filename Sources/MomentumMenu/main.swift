@@ -14,6 +14,22 @@ if let index = CommandLine.arguments.firstIndex(of: "--icon-preview"),
     exit(0)
 }
 
+// Lists paired devices and their SDP records, without connecting to anything.
+if CommandLine.arguments.contains("--devices") {
+    print(BluetoothDiagnostics.inventory())
+    exit(0)
+}
+
+// Opens candidate RFCOMM channels and reports which complete. Sends no
+// GAIA commands.
+if CommandLine.arguments.contains("--try-rfcomm") {
+    Task { @MainActor in
+        print(await BluetoothDiagnostics.probeChannels())
+        exit(0)
+    }
+    RunLoop.main.run()
+}
+
 if CommandLine.arguments.contains("--probe") {
     // IOBluetooth delivers its callbacks on the run loop, so we need one even
     // for a command line pass.

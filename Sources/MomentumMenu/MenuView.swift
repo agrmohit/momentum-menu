@@ -188,7 +188,7 @@ struct MenuView: View {
                                     Task { await controller.setBandGain(band: band.id, db: value) }
                                 }
                             ),
-                            in: -12.0...12.0, step: 0.5
+                            in: state.eqMinGainDb...state.eqMaxGainDb, step: 0.5
                         )
                         Text(String(format: "%+.1f", band.gainDb))
                             .font(.caption2.monospacedDigit())

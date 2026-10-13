@@ -58,6 +58,11 @@ public struct DeviceState: Sendable {
     public var bassBoost: Bool?
     public var bands: [EqBand] = []
     public var equaliserSupported = false
+    /// Gain limits as the device reports them in 0x1000, not as we assume.
+    /// A MOMENTUM 4 on 3.38.3 allows ±6.0 dB, well inside what the int8
+    /// encoding could carry.
+    public var eqMinGainDb: Double = -6
+    public var eqMaxGainDb: Double = 6
     public var firmware: String?
     /// Major version, so features can be gated on it. The parametric equaliser
     /// and bass boost exist only from firmware 3.x.
@@ -72,6 +77,17 @@ public struct DeviceState: Sendable {
     public var needsFirmwareUpdateForEq: Bool {
         guard let major = firmwareMajor else { return false }
         return major < 3
+    }
+}
+
+/// Read-only view of what macOS knows about paired Bluetooth devices.
+public enum BluetoothDiagnostics {
+    public static func inventory() -> String { RFCOMMTransport.inventory() }
+
+    /// Channels 1 and 2 are where GAIA has been seen; 14 is the other
+    /// RFCOMM service this device advertises. Hands-Free (10) is left alone.
+    public static func probeChannels() async -> String {
+        await RFCOMMTransport().probeChannels([1, 2, 14])
     }
 }
 
@@ -111,9 +127,9 @@ public final class HeadphoneController: ObservableObject {
         guard !state.connected else { return }
         do {
             // Only a deliberate action may wake the headphones onto this Mac.
-            try transport.connect(allowWake: userInitiated)
-            // The channel reports open asynchronously; give it a moment.
-            try await Task.sleep(for: .milliseconds(400))
+            // This now returns once the channel has actually opened, rather
+            // than once the request was accepted.
+            try await transport.connect(allowWake: userInitiated)
             state.connected = transport.isOpen
             state.deviceName = transport.deviceName
             state.lastError = nil
@@ -200,6 +216,16 @@ public final class HeadphoneController: ObservableObject {
             return
         }
 
+        // [bands, min i8, max i8, ...] — the device states its own range.
+        if config.count >= 3 {
+            let minimum = Gain.decode(config[1])
+            let maximum = Gain.decode(config[2])
+            if minimum < maximum {
+                state.eqMinGainDb = minimum
+                state.eqMaxGainDb = maximum
+            }
+        }
+
         var bands: [EqBand] = []
         for index in 0..<bandCount {
             var hz = 0
@@ -246,10 +272,12 @@ public final class HeadphoneController: ObservableObject {
     }
 
     public func setBandGain(band: Int, db: Double) async {
+        // Respect the device's own limits rather than the encoding's.
+        let clamped = max(state.eqMinGainDb, min(state.eqMaxGainDb, db))
         do {
-            _ = try await request(Cmd.setBandGain, payload: [UInt8(band), Gain.encode(db: db)])
+            _ = try await request(Cmd.setBandGain, payload: [UInt8(band), Gain.encode(db: clamped)])
             if let index = state.bands.firstIndex(where: { $0.id == band }) {
-                state.bands[index].gainDb = db
+                state.bands[index].gainDb = clamped
             }
             state.lastError = nil
         } catch {
