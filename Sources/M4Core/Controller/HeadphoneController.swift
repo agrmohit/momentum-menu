@@ -118,6 +118,9 @@ public final class HeadphoneController: ObservableObject {
     private var pending: [UInt16: (sequence: UInt64, continuation: CheckedContinuation<[UInt8], Error>)] = [:]
     private var nextSequence: UInt64 = 0
     private var modeWriteFormat: ModeWriteFormat = .unknown
+    /// While true, equaliser pushes are ignored: they are the device echoing a
+    /// partially applied curve, which is not worth showing anyone.
+    private var isApplyingPreset = false
 
     public init() {
         transport.onFrame = { [weak self] frame in
@@ -345,6 +348,16 @@ public final class HeadphoneController: ObservableObject {
             max(state.eqMinGainDb, min(state.eqMaxGainDb, $0))
         }
 
+        // Show the new curve at once and let the device catch up: five
+        // sequential writes take long enough that waiting for them makes the
+        // button feel broken.
+        //
+        // This is only safe because the flag suppresses equaliser pushes while
+        // the writes run. Without it the device's echo of each half-applied
+        // curve drags the not-yet-written sliders back, five times over.
+        isApplyingPreset = true
+        defer { isApplyingPreset = false }
+
         for (index, gain) in targets.enumerated() {
             state.bands[index].gainDb = gain
         }
@@ -354,8 +367,8 @@ public final class HeadphoneController: ObservableObject {
                 _ = try await request(Cmd.setBandGain,
                                       payload: [UInt8(index), Gain.encode(db: gain)])
             } catch {
-                // The shown curve is now a promise we failed to keep, so take
-                // the device's word for it rather than leaving a lie on screen.
+                // The curve on screen is now a promise we failed to keep, so
+                // take the device's word for it instead.
                 state.lastError = error.localizedDescription
                 await refreshEqualiser()
                 return
@@ -492,8 +505,9 @@ public final class HeadphoneController: ObservableObject {
                 state.noiseMode = adaptive == 1 ? .adaptive : .custom
             }
         case Cmd.getBandGain:
-            // Pushed as the whole curve, one gain per band.
-            if frame.payload.count == state.bands.count {
+            // Pushed as the whole curve, one gain per band. Ignored mid-preset:
+            // those are half-applied curves and showing them is the scatter.
+            if !isApplyingPreset, frame.payload.count == state.bands.count {
                 for (index, raw) in frame.payload.enumerated() {
                     state.bands[index].gainDb = Gain.decode(raw)
                 }

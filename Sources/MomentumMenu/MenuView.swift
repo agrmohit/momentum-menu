@@ -6,6 +6,35 @@ struct MenuView: View {
     @State private var pendingLevel: Double = 50
     @State private var showAdvanced = false
 
+    /// What the sliders display, which is not always what the device holds.
+    ///
+    /// A Slider repaints at its new value rather than travelling to it, so a
+    /// preset would blink into place however it was animated. These are stepped
+    /// through the intermediate positions instead, which is what actually moves
+    /// the knob.
+    @State private var shownGains: [Double] = []
+    @State private var tween: Task<Void, Never>?
+
+    private func moveGains(to targets: [Double], animated: Bool) {
+        tween?.cancel()
+        guard animated, shownGains.count == targets.count, !shownGains.isEmpty else {
+            shownGains = targets
+            return
+        }
+        let start = shownGains
+        tween = Task { @MainActor in
+            let steps = 18                       // ~0.3s at 60fps
+            for step in 1...steps {
+                if Task.isCancelled { return }
+                let t = Double(step) / Double(steps)
+                let eased = t * t * (3 - 2 * t)   // smoothstep, no abrupt start
+                shownGains = zip(start, targets).map { $0 + ($1 - $0) * eased }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            if !Task.isCancelled { shownGains = targets }
+        }
+    }
+
     private var state: DeviceState { controller.state }
 
     var body: some View {
@@ -25,9 +54,17 @@ struct MenuView: View {
         }
         .padding(14)
         .frame(width: 300)
-        .task { pendingLevel = Double(state.noiseLevel ?? 50) }
+        .task {
+            pendingLevel = Double(state.noiseLevel ?? 50)
+            shownGains = state.bands.map(\.gainDb)
+        }
         .onChange(of: state.noiseLevel) { _, new in
             if let new { pendingLevel = Double(new) }
+        }
+        .onChange(of: state.bands.map(\.gainDb)) { _, new in
+            // Already there when the change came from dragging a slider.
+            guard shownGains != new else { return }
+            moveGains(to: new, animated: shownGains.count == new.count)
         }
     }
 
@@ -161,7 +198,11 @@ struct MenuView: View {
                     Button {
                         Task { await controller.apply(preset) }
                     } label: {
-                        Text(preset.name).font(.caption2)
+                        Text(preset.name)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity)   // share the width evenly
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -213,9 +254,15 @@ struct MenuView: View {
                 }
                 .buttonStyle(.plain)
 
-                if showAdvanced {
-                    bandSliders
-                }
+                // Always built, merely collapsed. Creating five slider-backed
+                // views at click time is what made opening this feel slow;
+                // they are cheap to keep and instant to reveal.
+                bandSliders
+                    .frame(height: showAdvanced ? nil : 0, alignment: .top)
+                    .opacity(showAdvanced ? 1 : 0)
+                    .clipped()
+                    .allowsHitTesting(showAdvanced)
+                    .accessibilityHidden(!showAdvanced)
             }
         }
     }
@@ -231,21 +278,36 @@ struct MenuView: View {
                         .foregroundStyle(.secondary)
                     Slider(
                         value: Binding(
-                            get: { band.gainDb },
+                            get: { shownGain(band) },
                             set: { value in
-                                Task { await controller.setBandGain(band: band.id, db: value) }
+                                // Track the drag locally; the device is told
+                                // once, on release. Writing every 0.1 dB would
+                                // flood the control channel.
+                                tween?.cancel()
+                                if shownGains.indices.contains(band.id) {
+                                    shownGains[band.id] = value
+                                }
                             }
                         ),
-                        in: state.eqMinGainDb...state.eqMaxGainDb, step: 0.5
+                        in: state.eqMinGainDb...state.eqMaxGainDb,
+                        step: 0.1,
+                        onEditingChanged: { editing in
+                            guard !editing else { return }
+                            let value = shownGain(band)
+                            Task { await controller.setBandGain(band: band.id, db: value) }
+                        }
                     )
-                    Text(String(format: "%+.1f", band.gainDb))
+                    Text(String(format: "%+.1f", shownGain(band)))
                         .font(.caption2.monospacedDigit())
                         .frame(width: 34, alignment: .leading)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: state.bands.map(\.gainDb))
+    }
+
+    private func shownGain(_ band: EqBand) -> Double {
+        shownGains.indices.contains(band.id) ? shownGains[band.id] : band.gainDb
     }
 
     // MARK: - Footer
