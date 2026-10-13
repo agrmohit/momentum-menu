@@ -26,6 +26,8 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 | Noise control mode (Off / Adaptive / Custom) | works |
 | Noise level slider (ANC ↔ transparency) | works |
 | Touch-control state (read) | works |
+| Disconnect (frees a multipoint slot) | works |
+| Settings: launch at login, hide icon, update checks | works |
 | Equaliser | **not yet working** — see below |
 | Bass boost | **not yet working** — see below |
 | Firmware version | **not yet working** — see below |
@@ -35,6 +37,21 @@ error `0x05` (malformed or wrong length). On this device that error is
 ambiguous: it means either "unsupported" or "this getter needs an argument and
 you sent an empty payload". `--probe --diagnose` asks each id both ways to tell
 those apart. Resolving this is the next piece of work.
+
+## Using it
+
+Left click the menu bar icon for battery, noise control and the equaliser.
+Right click for Settings, update checks and Exit.
+
+**Disconnect** drops this Mac's Bluetooth link entirely, rather than just the
+control channel, so one of the headphones' two multipoint slots is freed for
+another device. The two-link ceiling is in the headphones' own firmware and no
+host can raise it, so handing a slot over is the only way to involve a third
+device. The app will not reconnect by itself afterwards — that would take back
+the slot you just gave away — so use **Reconnect** when you want them again.
+
+**Hide menu bar icon** leaves the app running with nothing to click. Opening
+Momentum Menu again reopens Settings, which is how you turn the icon back on.
 
 ## Explicitly out of scope: firmware updates
 

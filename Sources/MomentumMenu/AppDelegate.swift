@@ -9,15 +9,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let controller = HeadphoneController()
+    private let preferences = Preferences.shared
+    private let updateChecker = UpdateChecker()
+    private var settingsWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var pollTimer: Timer?
+    private var updateTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = StatusIcon.image(batteryPercent: nil, connected: false)
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.target = self
-        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.action = #selector(statusItemClicked)
+        // Left click opens the popover, right click opens the menu. Without
+        // this the button only reports left clicks.
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+        preferences.onMenuBarIconVisibilityChanged = { [weak self] visible in
+            self?.statusItem.isVisible = visible
+        }
+        statusItem.isVisible = !preferences.hideMenuBarIcon
+
+        // With the icon hidden there is nothing left to click, so opening the
+        // app again has to lead somewhere useful: the window that can turn it
+        // back on.
+        if preferences.hideMenuBarIcon {
+            openSettings()
+        }
 
         popover = NSPopover()
         popover.behavior = .transient
@@ -46,10 +65,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        if preferences.automaticUpdateChecks {
+            Task { await updateChecker.check() }
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.preferences.automaticUpdateChecks else { return }
+                    await self.updateChecker.check()
+                }
+            }
+        }
+    }
+
+    /// Reopening a menu bar app has no window to restore, so send the user to
+    /// Settings — which is the only way back when the icon is hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        openSettings()
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         pollTimer?.invalidate()
+        updateTimer?.invalidate()
         controller.disconnect()
     }
 
@@ -75,7 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePopover() {
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        let isSecondary = event?.type == .rightMouseUp
+            || event?.modifierFlags.contains(.control) == true
+        if isSecondary {
+            showContextMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
@@ -84,5 +132,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.contentViewController?.view.window?.makeKey()
             Task { await controller.connect() }
         }
+    }
+
+    private func showContextMenu() {
+        if popover.isShown { popover.performClose(nil) }
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettingsItem), keyEquivalent: ",")
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdatesItem), keyEquivalent: "")
+
+        menu.addItem(.separator())
+        let disconnect = menu.addItem(withTitle: "Disconnect",
+                                      action: #selector(disconnectItem), keyEquivalent: "")
+        disconnect.isEnabled = controller.state.connected
+        disconnect.toolTip = "Free one of the headphones' two connection slots for another device."
+
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Exit App", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        for item in menu.items where item.action != #selector(NSApplication.terminate(_:)) {
+            item.target = self
+        }
+
+        // Attaching the menu and clicking the button is what positions it under
+        // the status item; it is detached again so the next left click still
+        // reaches our action rather than opening this menu.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func openSettingsItem() { openSettings() }
+
+    @objc private func disconnectItem() { controller.releaseHeadphones() }
+
+    @objc private func checkForUpdatesItem() {
+        openSettings()
+        Task { await updateChecker.check() }
+    }
+
+    private func openSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                                  styleMask: [.titled, .closable],
+                                  backing: .buffered,
+                                  defer: false)
+            window.title = "Momentum Menu Settings"
+            window.contentViewController = NSHostingController(
+                rootView: SettingsView(preferences: preferences, updates: updateChecker))
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        // An accessory app has no Dock icon and does not get focus for free.
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 }

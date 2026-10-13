@@ -81,7 +81,7 @@ struct MenuView: View {
                     Task { await controller.connect(userInitiated: true) }
                 }
                 Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
+                Button("Exit App") { NSApplication.shared.terminate(nil) }
             }
         }
     }
@@ -204,13 +204,13 @@ struct MenuView: View {
                 Text("Firmware \(firmware)").font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
-            Button("Hand over") { controller.releaseHeadphones() }
+            Button("Disconnect") { controller.releaseHeadphones() }
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .help("Disconnect from this Mac, freeing one of the headphones' "
                       + "two connection slots for another device. They stay paired, "
                       + "and this app won't reconnect until you ask it to.")
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+            Button("Exit App") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)
         }
