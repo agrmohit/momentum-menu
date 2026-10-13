@@ -30,6 +30,29 @@ if CommandLine.arguments.contains("--try-rfcomm") {
     RunLoop.main.run()
 }
 
+// Connects and prints every frame the headphones send, so unsolicited pushes
+// (charging, on-head detection) can be seen. Sends nothing but the connect
+// handshake.
+if let index = CommandLine.arguments.firstIndex(of: "--listen") {
+    let seconds = Double(CommandLine.arguments.dropFirst(index + 1).first ?? "") ?? 45
+    Task { @MainActor in
+        let controller = HeadphoneController()
+        controller.frameLogger = { print($0) }
+        await controller.connect(userInitiated: true)
+        guard controller.state.connected else {
+            FileHandle.standardError.write(Data(
+                ((controller.state.lastError ?? "Could not reach the headphones.") + "\n").utf8))
+            exit(1)
+        }
+        print("Listening \(Int(seconds))s — plug or unplug the charging cable now.")
+        try? await Task.sleep(for: .seconds(seconds))
+        print("Done.")
+        controller.disconnect()
+        exit(0)
+    }
+    RunLoop.main.run()
+}
+
 if CommandLine.arguments.contains("--probe") {
     // IOBluetooth delivers its callbacks on the run loop, so we need one even
     // for a command line pass.

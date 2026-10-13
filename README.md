@@ -23,7 +23,7 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 | Feature | State |
 | --- | --- |
 | Battery level | works |
-| Charging indicator | works — **only while connected**, see below |
+| Charging indicator | works |
 | Noise control mode (Off / Adaptive / Custom) | works |
 | Noise level slider (ANC ↔ transparency) | works |
 | Touch-control state (read) | works |
@@ -36,16 +36,28 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 Verified against a MOMENTUM 4 Wireless on firmware 3.38.3, and previously on
 2.13.42.
 
-### Charging is announced, never asked
+### The device tells you nothing unless you subscribe
 
-The headphones push `0x0682` when the cable goes in or out, and there is no
-getter for it — probing found none, and the ids that might have been one live
-in the `0x06xx` power group that must not be swept. So the charging indicator
-only appears once the cable state *changes* while the app is connected. Plug in
-before launching and it will not know until you unplug.
+GAIA devices answer questions, but volunteer nothing to a client that has not
+registered. Command `0x0007` subscribes to one feature, by id, and GAIA v3
+packs the feature into the command itself — `feature = command >> 9`. So
+charging (`0x0682`) is feature 3, ANC (`0x1A05`) is 13, the equaliser
+(`0x1003`) is 8.
 
-That is why the icon shows charging as a slow pulse rather than a bolt: a bolt
-at 2.5pt tall is an unreadable smudge, and motion survives the size.
+This app subscribes to battery, ANC, equaliser and transparency at connect.
+Two things follow:
+
+- **Charging is known immediately.** There is no getter for it, but the device
+  pushes the current state the moment you subscribe, so it does not have to
+  wait for the cable to move. The icon shows it as a slow pulse rather than a
+  bolt: at 2.5pt tall a bolt is an unreadable smudge, and motion survives the
+  size.
+- **The menu stays honest.** Change ANC, the equaliser or bass boost from the
+  phone app and the device pushes it here, instead of the menu being stale
+  until the next poll.
+
+Without that subscription the headphones look broken in a very convincing way:
+every request is answered correctly and nothing is ever announced.
 
 ### The firmware 3.x gate
 

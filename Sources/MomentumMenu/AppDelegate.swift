@@ -4,7 +4,19 @@ import M4Core
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+
+    /// Fade on the way out, instant on the way in and while resizing.
+    nonisolated func popoverShouldClose(_ popover: NSPopover) -> Bool {
+        MainActor.assumeIsolated { popover.animates = true }
+        return true
+    }
+
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            (notification.object as? NSPopover)?.animates = false
+        }
+    }
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -45,12 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // No fixed contentSize: the popover grows and shrinks with its content,
         // so expanding Advanced Audio Settings is not clipped.
         //
-        // animates = false is deliberate. With it on, AppKit slides the whole
-        // popover as the content height changes, which reads as the box
-        // lurching up and down rather than a section opening. Resizing
-        // instantly and letting SwiftUI animate the disclosure inside is the
-        // calmer of the two.
+        // animates covers both the show/close transition and content resizing,
+        // and we want opposite things from those two. Resizing must be instant
+        // or expanding a section drags the whole box about; closing should
+        // fade. So it stays off while open and is switched on just before a
+        // close, in popoverShouldClose.
         popover.animates = false
+        popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: MenuView(controller: controller))
 
         controller.$state
@@ -177,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
-            popover.performClose(nil)
+            popover.performClose(nil)   // delegate turns the fade on
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()

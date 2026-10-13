@@ -104,6 +104,9 @@ public final class HeadphoneController: ObservableObject {
 
     @Published public private(set) var state = DeviceState()
 
+    /// Every frame the device sends, for diagnostics. Set before connecting.
+    public var frameLogger: ((String) -> Void)?
+
     private let transport = RFCOMMTransport()
     /// In-flight requests by command id, each tagged with a sequence number.
     ///
@@ -118,7 +121,10 @@ public final class HeadphoneController: ObservableObject {
 
     public init() {
         transport.onFrame = { [weak self] frame in
-            MainActor.assumeIsolated { self?.handle(frame) }
+            MainActor.assumeIsolated {
+                self?.log(frame)
+                self?.handle(frame)
+            }
         }
         transport.onDisconnect = { [weak self] in
             MainActor.assumeIsolated {
@@ -154,7 +160,10 @@ public final class HeadphoneController: ObservableObject {
             state.connected = transport.isOpen
             state.deviceName = transport.deviceName
             state.lastError = nil
-            if state.connected { await refresh() }
+            if state.connected {
+                await registerForNotifications()
+                await refresh()
+            }
         } catch {
             state.connected = false
             state.lastError = error.localizedDescription
@@ -184,6 +193,25 @@ public final class HeadphoneController: ObservableObject {
     }
 
     // MARK: - Reading
+
+    /// Subscribes to the features whose pushes we act on.
+    ///
+    /// The device sends nothing to a client that has not asked. That is why
+    /// charging appeared undetectable: it is announced, but only to
+    /// subscribers, and we were not one. Battery (3) carries the charging
+    /// push; the rest keep the menu honest when the phone app or the
+    /// headset's own controls change something.
+    ///
+    /// Failures are ignored: an unsupported feature is not a reason to refuse
+    /// to connect.
+    private func registerForNotifications() async {
+        for feature in [Cmd.Feature.battery, Cmd.Feature.anc,
+                        Cmd.Feature.userEq, Cmd.Feature.transparency] {
+            _ = try? await request(Cmd.registerNotification,
+                                   payload: [feature],
+                                   timeout: .seconds(1))
+        }
+    }
 
     /// Reads each property independently.
     ///
@@ -417,6 +445,20 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
+    private func log(_ frame: GaiaFrame) {
+        guard let frameLogger else { return }
+        let kind: String
+        switch frame.responseKind {
+        case .success: kind = "ok      "
+        case .error: kind = "error   "
+        case .notification: kind = "NOTIFY  "
+        case nil: kind = "unsolicited"
+        }
+        let hex = frame.payload.map { String(format: "%02X", $0) }.joined(separator: " ")
+        frameLogger(String(format: "0x%04X  %@  base=0x%04X  [%@]",
+                           frame.command, kind, frame.baseCommand, hex))
+    }
+
     private func handle(_ frame: GaiaFrame) {
         guard let kind = frame.responseKind else { return }
         switch kind {
@@ -443,6 +485,21 @@ public final class HeadphoneController: ObservableObject {
             if let value = frame.payload.first { state.noiseLevel = Int(value) }
         case Cmd.getAncEnabled:
             if let value = frame.payload.first, value == 0 { state.noiseMode = .off }
+        case Cmd.getModeTable:
+            // Arrives alongside the ANC push, so the pair settles the mode.
+            if state.noiseMode != .off,
+               let adaptive = Self.modeValue(in: frame.payload, id: Cmd.modeAdaptive) {
+                state.noiseMode = adaptive == 1 ? .adaptive : .custom
+            }
+        case Cmd.getBandGain:
+            // Pushed as the whole curve, one gain per band.
+            if frame.payload.count == state.bands.count {
+                for (index, raw) in frame.payload.enumerated() {
+                    state.bands[index].gainDb = Gain.decode(raw)
+                }
+            }
+        case Cmd.getBassBoost:
+            if let value = frame.payload.first { state.bassBoost = value != 0 }
         case Cmd.chargingNotification:
             if let value = frame.payload.first {
                 state.isCharging = value != 0

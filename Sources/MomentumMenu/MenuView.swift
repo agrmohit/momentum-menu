@@ -191,17 +191,31 @@ struct MenuView: View {
                 // Per-band parametric gains are not what most people want from
                 // a menu bar: the presets are. Tucked away, but one click deep
                 // rather than absent.
-                DisclosureGroup(isExpanded: $showAdvanced) {
-                    bandSliders.padding(.top, 6)
+                // Deliberately not a DisclosureGroup. That animates its own
+                // expansion, so the content height changes on every frame of
+                // the animation and the popover resizes to match each one —
+                // which reads as the whole box juddering up and down rather
+                // than a section opening. A plain button changes the layout
+                // exactly once, and the transaction makes sure of it.
+                Button {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { showAdvanced.toggle() }
                 } label: {
-                    Text("Advanced Audio Settings")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                        Text("Advanced Audio Settings").font(.caption)
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
                 }
-                .disclosureGroupStyle(.automatic)
-                // The popover resizes to fit; animating the content as well
-                // means two things moving at once.
-                .animation(nil, value: showAdvanced)
+                .buttonStyle(.plain)
+
+                if showAdvanced {
+                    bandSliders
+                }
             }
         }
     }

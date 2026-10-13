@@ -11,6 +11,21 @@ import Foundation
 /// Convention on this device: odd id reads, the even id below it writes.
 /// The equaliser group does not follow that rule, so it is spelled out.
 enum Cmd {
+    // Notifications ------------------------------------------------------
+    /// Core feature, command 7: subscribe to one feature's notifications.
+    /// Payload is a single feature id. Without this the device answers
+    /// questions and volunteers nothing.
+    static let registerNotification: UInt16 = 0x0007
+
+    /// GAIA v3 packs the feature into the command: `feature = command >> 9`.
+    /// So 0x0682 (charging) is feature 3, 0x1A05 (ANC) is 13, 0x1003 (EQ) is 8.
+    enum Feature {
+        static let battery: UInt8 = 3       // includes the charging push
+        static let userEq: UInt8 = 8
+        static let transparency: UInt8 = 12
+        static let anc: UInt8 = 13
+    }
+
     // Battery -----------------------------------------------------------
     /// -> [] ; <- [percent]. Keeps answering while charging.
     static let getBattery: UInt16 = 0x0603
@@ -18,10 +33,9 @@ enum Cmd {
     /// Push only, as 0x0682: [1] when the cable goes in, [0] when it comes out.
     /// Reported by the headphones themselves, so a wall charger counts.
     ///
-    /// There is no getter. Probing found none, and the ids that might have been
-    /// one sit in the 0x06xx power group that must not be swept. So charging is
-    /// observable but not pollable: until the cable state changes while we are
-    /// connected, we genuinely do not know it.
+    /// There is no getter for it — but subscribing to feature 3 makes the
+    /// device send the current state straight away, so the state is known from
+    /// connect onwards rather than only after the cable next moves.
     static let chargingNotification: UInt16 = 0x0602
 
     // Noise control -----------------------------------------------------
