@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var pollTimer: Timer?
     private var updateTimer: Timer?
+    private var connectingTimer: Timer?
+    private var connectingPhase: Double = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -88,21 +90,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         pollTimer?.invalidate()
         updateTimer?.invalidate()
+        connectingTimer?.invalidate()
         controller.disconnect()
     }
 
     private func updateStatusItem(_ state: DeviceState) {
         guard let button = statusItem.button else { return }
 
+        if state.isConnecting { startConnectingAnimation() } else { stopConnectingAnimation() }
+
         // The battery bar carries the level, so no percentage text: it would
         // say the same thing twice and double the item's width, which matters
         // on a crowded menu bar. The exact figure is in the popover and the
         // tooltip.
         button.image = StatusIcon.image(batteryPercent: state.batteryPercent,
-                                        connected: state.connected)
-        button.appearsDisabled = !state.connected
+                                        connected: state.connected,
+                                        connectingPhase: state.isConnecting ? connectingPhase : nil)
+        // Not dimmed while connecting: the sweep should be visible.
+        button.appearsDisabled = !state.connected && !state.isConnecting
 
-        if state.connected {
+        if state.isConnecting {
+            button.toolTip = "MOMENTUM 4 — connecting…"
+        } else if state.connected {
             let battery = state.batteryPercent.map { "\($0)%" } ?? "battery unknown"
             let mode = state.noiseMode?.rawValue ?? "unknown mode"
             button.toolTip = "MOMENTUM 4 — \(battery), \(mode)"
@@ -111,6 +120,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             button.toolTip = "MOMENTUM 4 — not connected"
         }
+    }
+
+    private func startConnectingAnimation() {
+        guard connectingTimer == nil else { return }
+        connectingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 12, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let button = self.statusItem.button else { return }
+                self.connectingPhase += 0.07
+                button.image = StatusIcon.image(batteryPercent: nil, connected: false,
+                                                connectingPhase: self.connectingPhase)
+            }
+        }
+    }
+
+    private func stopConnectingAnimation() {
+        connectingTimer?.invalidate()
+        connectingTimer = nil
+        connectingPhase = 0
     }
 
     @objc private func statusItemClicked() {

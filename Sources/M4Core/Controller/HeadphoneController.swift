@@ -50,6 +50,10 @@ public struct EqPreset: Identifiable, Sendable {
 
 public struct DeviceState: Sendable {
     public var connected = false
+    /// A connection attempt is in flight. Distinct from `connected == false`,
+    /// which on its own cannot tell "no headphones here" from "working on it"
+    /// — and opening the control channel can take several seconds.
+    public var isConnecting = false
     public var deviceName: String?
     public var batteryPercent: Int?
     public var noiseMode: NoiseMode?
@@ -132,7 +136,13 @@ public final class HeadphoneController: ObservableObject {
             guard userInitiated else { return }
             state.releasedByUser = false
         }
-        guard !state.connected else { return }
+        // Also guards against overlapping attempts: the poll timer and the
+        // popover can both ask at once, and two opens racing on one channel
+        // is nobody's idea of a good time.
+        guard !state.connected, !state.isConnecting else { return }
+        state.isConnecting = true
+        defer { state.isConnecting = false }
+
         do {
             // Only a deliberate action may wake the headphones onto this Mac.
             // This now returns once the channel has actually opened, rather

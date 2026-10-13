@@ -65,7 +65,17 @@ struct MenuView: View {
 
     private var disconnected: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if state.releasedByUser {
+            if state.isConnecting {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Connecting…").font(.callout).foregroundStyle(.secondary)
+                }
+                Text("Opening the control channel. This can take a few seconds, "
+                     + "especially just after the headphones wake up.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if state.releasedByUser {
                 Text("Handed over").font(.callout).foregroundStyle(.secondary)
                 Text("This Mac has let go of the headphones, so another device "
                      + "can use that slot. They'll stay released until you reconnect.")
@@ -85,6 +95,7 @@ struct MenuView: View {
                 Button(state.releasedByUser ? "Reconnect" : "Try again") {
                     Task { await controller.connect(userInitiated: true) }
                 }
+                .disabled(state.isConnecting)
                 Spacer()
                 Button("Exit App") { NSApplication.shared.terminate(nil) }
             }

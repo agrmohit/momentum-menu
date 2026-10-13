@@ -41,16 +41,23 @@ enum StatusIcon {
         return nil
     }
 
-    static func image(batteryPercent: Int?, connected: Bool) -> NSImage {
+    /// - Parameter connectingPhase: 0...1 to draw an indeterminate sweep in
+    ///   place of the battery fill. Opening the control channel can take
+    ///   several seconds, and a still, dim icon is indistinguishable from "no
+    ///   headphones here" — which is precisely the wrong thing to say while
+    ///   we are in the middle of reaching them.
+    static func image(batteryPercent: Int?, connected: Bool, connectingPhase: Double? = nil) -> NSImage {
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
-            render(batteryPercent: batteryPercent, connected: connected, tint: .black)
+            render(batteryPercent: batteryPercent, connected: connected,
+                   tint: .black, connectingPhase: connectingPhase)
             return true
         }
         image.isTemplate = true
         return image
     }
 
-    private static func render(batteryPercent: Int?, connected: Bool, tint: NSColor) {
+    private static func render(batteryPercent: Int?, connected: Bool, tint: NSColor,
+                               connectingPhase: Double? = nil) {
         // Headphones, centred along the top.
         if let symbol = headphones(tint: tint) {
             let size = symbol.size
@@ -64,6 +71,22 @@ enum StatusIcon {
                            width: barWidth, height: barHeight)
         tint.withAlphaComponent(0.3).setFill()
         NSBezierPath(roundedRect: track, xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+
+        // A segment sweeping along the track: busy, with no false precision
+        // about how far along we are.
+        if let phase = connectingPhase {
+            let segment = barWidth * 0.4
+            let travel = barWidth + segment
+            let x = track.minX - segment + travel * CGFloat(phase.truncatingRemainder(dividingBy: 1))
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: track, xRadius: barHeight / 2, yRadius: barHeight / 2)
+                .addClip()
+            tint.setFill()
+            NSBezierPath(roundedRect: NSRect(x: x, y: track.minY, width: segment, height: barHeight),
+                         xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
 
         // Fill, proportional to charge.
         guard connected, let percent = batteryPercent else { return }
