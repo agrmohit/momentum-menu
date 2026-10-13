@@ -129,7 +129,7 @@ struct MenuView: View {
             }
 
             HStack(spacing: 4) {
-                ForEach(EqPreset.all) { preset in
+                ForEach(state.equaliserSupported ? EqPreset.all : []) { preset in
                     Button {
                         Task { await controller.apply(preset) }
                     } label: {
@@ -144,8 +144,21 @@ struct MenuView: View {
             }
 
             if state.bands.isEmpty {
-                Text("Equaliser not readable on this firmware.")
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    if state.needsFirmwareUpdateForEq {
+                        Text("Needs firmware 3.x")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("The equaliser and bass boost were added in firmware 3. "
+                             + "You're on \(state.firmware ?? "2.x"). Update in Sennheiser's "
+                             + "iPhone app — this app won't write firmware.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Equaliser not available on this device.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             } else {
                 ForEach(state.bands) { band in
                     HStack(spacing: 8) {

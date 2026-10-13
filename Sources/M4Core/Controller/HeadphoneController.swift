@@ -57,8 +57,19 @@ public struct DeviceState: Sendable {
     public var noiseLevel: Int?
     public var bassBoost: Bool?
     public var bands: [EqBand] = []
+    public var equaliserSupported = false
     public var firmware: String?
+    /// Major version, so features can be gated on it. The parametric equaliser
+    /// and bass boost exist only from firmware 3.x.
+    public var firmwareMajor: Int?
     public var lastError: String?
+
+    /// True when the device is running firmware old enough to lack the
+    /// equaliser entirely.
+    public var needsFirmwareUpdateForEq: Bool {
+        guard let major = firmwareMajor else { return false }
+        return major < 3
+    }
 }
 
 /// Talks to a MOMENTUM 4 over GAIA and keeps a view of its state.
@@ -109,39 +120,57 @@ public final class HeadphoneController: ObservableObject {
 
     // MARK: - Reading
 
+    /// Reads each property independently.
+    ///
+    /// These deliberately do not share a do/catch. An earlier version ran them
+    /// as one throwing sequence, and on firmware 2.x the equaliser's rejection
+    /// aborted the rest — firmware version and bass boost were never asked for
+    /// at all, and the app reported them as unknown when the device would have
+    /// answered both. One unsupported feature must not hide the others.
     public func refresh() async {
         guard state.connected else { return }
-        do {
-            state.batteryPercent = Int(try await request(Cmd.getBattery).first ?? 0)
 
-            let ancOn = (try await request(Cmd.getAncEnabled).first ?? 0) != 0
-            let table = try await request(Cmd.getModeTable)
-            let adaptive = Self.modeValue(in: table, id: Cmd.modeAdaptive) == 1
-            state.noiseMode = ancOn ? (adaptive ? .adaptive : .custom) : .off
-            state.noiseLevel = Int(try await request(Cmd.getNoiseLevel).first ?? 0)
+        state.batteryPercent = (try? await request(Cmd.getBattery).first).map { Int($0) }
 
-            try await refreshEqualiser()
-
-            // Rejected on firmware 2.x; absence is not an error.
-            state.bassBoost = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
-
-            if let version = try? await request(Cmd.getFirmwareVersion), version.count >= 6 {
-                let parts = stride(from: 0, to: 6, by: 2).map { Int(version[$0]) << 8 | Int(version[$0 + 1]) }
-                state.firmware = parts.map(String.init).joined(separator: ".")
-            }
-            state.lastError = nil
-        } catch {
-            state.lastError = error.localizedDescription
+        if let anc = try? await request(Cmd.getAncEnabled).first {
+            let table = try? await request(Cmd.getModeTable)
+            let adaptive = table.flatMap { Self.modeValue(in: $0, id: Cmd.modeAdaptive) } == 1
+            state.noiseMode = anc != 0 ? (adaptive ? .adaptive : .custom) : .off
         }
+        state.noiseLevel = (try? await request(Cmd.getNoiseLevel).first).map { Int($0) }
+
+        if let version = try? await request(Cmd.getFirmwareVersion), version.count >= 6 {
+            let parts = stride(from: 0, to: 6, by: 2).map { Int(version[$0]) << 8 | Int(version[$0 + 1]) }
+            state.firmware = parts.map(String.init).joined(separator: ".")
+            state.firmwareMajor = parts.first
+        }
+
+        await refreshEqualiser()
+
+        // Bass boost arrived with firmware 3.x and is rejected outright on 2.x,
+        // so a failure here means "not on this firmware", not "broken".
+        state.bassBoost = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
+
+        state.lastError = nil
     }
 
-    private func refreshEqualiser() async throws {
-        let config = try await request(Cmd.getEqConfig)
-        let bandCount = Int(config.first ?? 5)
-        guard bandCount > 0, bandCount <= 16 else { return }
+    private func refreshEqualiser() async {
+        // The parametric equaliser is a firmware 3.x feature. On 2.x these ids
+        // are rejected, which is a fact about the device rather than an error
+        // worth showing the user as one.
+        guard let config = try? await request(Cmd.getEqConfig),
+              let gains = try? await request(Cmd.getAllGains, payload: [0]) else {
+            state.bands = []
+            state.equaliserSupported = false
+            return
+        }
 
-        // 0x1003 needs *some* payload byte; an empty one is rejected.
-        let gains = try await request(Cmd.getAllGains, payload: [0])
+        let bandCount = Int(config.first ?? 5)
+        guard bandCount > 0, bandCount <= 16 else {
+            state.bands = []
+            state.equaliserSupported = false
+            return
+        }
 
         var bands: [EqBand] = []
         for index in 0..<bandCount {
@@ -153,6 +182,7 @@ public final class HeadphoneController: ObservableObject {
             bands.append(EqBand(id: index, frequencyHz: hz, gainDb: gain))
         }
         state.bands = bands
+        state.equaliserSupported = true
     }
 
     // MARK: - Writing
@@ -367,9 +397,11 @@ public final class HeadphoneController: ObservableObject {
         lines.append("Firmware: \(state.firmware ?? "unknown")")
         lines.append("Battery:  \(state.batteryPercent.map { "\($0)%" } ?? "unknown")")
         lines.append("Noise:    \(state.noiseMode?.rawValue ?? "unknown") at level \(state.noiseLevel.map(String.init) ?? "?")")
-        lines.append("Bass:     \(state.bassBoost.map { $0 ? "on" : "off" } ?? "unsupported on this firmware")")
+        lines.append("Bass:     \(state.bassBoost.map { $0 ? "on" : "off" } ?? "not on this firmware (needs 3.x)")")
         if state.bands.isEmpty {
-            lines.append("EQ:       not readable")
+            lines.append("EQ:       " + (state.needsFirmwareUpdateForEq
+                                         ? "not on this firmware (added in 3.x)"
+                                         : "not available"))
         } else {
             let curve = state.bands.map { "\($0.label)Hz \(String(format: "%+.1f", $0.gainDb))dB" }
             lines.append("EQ:       " + curve.joined(separator: "  "))
