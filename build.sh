@@ -61,6 +61,11 @@ if [ "${2:-}" = "install" ]; then
     mkdir -p "$HOME/Applications"
     rm -rf "$DEST"
     cp -R "$APP" "$DEST"
+
+    # Leave exactly one bundle with this id on disk. Two copies make
+    # `open -a MomentumMenu` ambiguous, and Launch Services will happily
+    # pick the stale one out of a build directory.
+    rm -rf "$APP"
     echo
     echo "Installed. Launch it with:"
     echo "  open -a MomentumMenu"
