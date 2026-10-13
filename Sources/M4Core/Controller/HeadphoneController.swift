@@ -62,6 +62,9 @@ public struct DeviceState: Sendable {
     /// Major version, so features can be gated on it. The parametric equaliser
     /// and bass boost exist only from firmware 3.x.
     public var firmwareMajor: Int?
+    /// Set when the user asked to hand the headphones over to another device.
+    /// Stops the app's background poll from quietly grabbing them back.
+    public var releasedByUser = false
     public var lastError: String?
 
     /// True when the device is running firmware old enough to lack the
@@ -97,7 +100,14 @@ public final class HeadphoneController: ObservableObject {
 
     // MARK: - Connection
 
-    public func connect() async {
+    /// - Parameter userInitiated: true when the user asked for this. Background
+    ///   polling passes false, so that after a deliberate hand-off the app does
+    ///   not reconnect a second later and take the slot straight back.
+    public func connect(userInitiated: Bool = false) async {
+        if state.releasedByUser {
+            guard userInitiated else { return }
+            state.releasedByUser = false
+        }
         guard !state.connected else { return }
         do {
             try transport.connect()
@@ -113,9 +123,26 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
+    /// Closes the control channel only. The headphones stay connected to this
+    /// Mac and audio is unaffected. Used when the app quits.
     public func disconnect() {
         transport.disconnect()
         state.connected = false
+    }
+
+    /// Hands the headphones over: drops the Mac's Bluetooth link entirely so
+    /// one of the two multipoint slots is freed for another device.
+    ///
+    /// The app will not reconnect on its own afterwards — reclaiming the slot
+    /// it was just asked to give up would defeat the purpose. Use
+    /// `connect(userInitiated: true)` to take it back.
+    public func releaseHeadphones() {
+        failAllPending(TransportError.notConnected)
+        transport.releaseLink()
+        state.connected = false
+        state.releasedByUser = true
+        state.batteryPercent = nil
+        state.lastError = nil
     }
 
     // MARK: - Reading

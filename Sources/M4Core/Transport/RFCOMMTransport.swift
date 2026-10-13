@@ -138,6 +138,25 @@ final class RFCOMMTransport: NSObject {
         inbound.removeAll()
     }
 
+    /// Drops the entire Bluetooth link, not just the control channel.
+    ///
+    /// The M4 holds two multipoint links at once, and that ceiling is in its
+    /// own firmware — nothing a host can send raises it. So the only way to
+    /// free a slot for a third device is for one of the current two to let go,
+    /// which is what this does from the Mac's side.
+    ///
+    /// Note this is the same `closeConnection()` that `disconnect()` must
+    /// never call: there it would cut the user's audio as a side effect of
+    /// tidying up. Here severing the link is the entire point.
+    func releaseLink() {
+        channel?.setDelegate(nil)
+        channel?.close()
+        channel = nil
+        inbound.removeAll()
+        device?.closeConnection()
+        device = nil
+    }
+
     func send(_ frame: GaiaFrame) throws {
         if let reason = CommandSafety.rejectionReason(for: frame.command) {
             throw TransportError.blockedCommand(reason: reason)

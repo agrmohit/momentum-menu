@@ -60,15 +60,26 @@ struct MenuView: View {
 
     private var disconnected: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(state.lastError ?? "Not connected.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("The headphones must be paired and connected to this Mac.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if state.releasedByUser {
+                Text("Handed over").font(.callout).foregroundStyle(.secondary)
+                Text("This Mac has let go of the headphones, so another device "
+                     + "can use that slot. They'll stay released until you reconnect.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(state.lastError ?? "Not connected.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("The headphones must be paired and switched on.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
             HStack {
-                Button("Try again") { Task { await controller.connect() } }
+                Button(state.releasedByUser ? "Reconnect" : "Try again") {
+                    Task { await controller.connect(userInitiated: true) }
+                }
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
@@ -188,11 +199,17 @@ struct MenuView: View {
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 10) {
             if let firmware = state.firmware {
                 Text("Firmware \(firmware)").font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
+            Button("Hand over") { controller.releaseHeadphones() }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .help("Disconnect from this Mac, freeing one of the headphones' "
+                      + "two connection slots for another device. They stay paired, "
+                      + "and this app won't reconnect until you ask it to.")
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless)
                 .font(.caption)

@@ -68,6 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let battery = state.batteryPercent.map { "\($0)%" } ?? "battery unknown"
             let mode = state.noiseMode?.rawValue ?? "unknown mode"
             button.toolTip = "MOMENTUM 4 — \(battery), \(mode)"
+        } else if state.releasedByUser {
+            button.toolTip = "MOMENTUM 4 — handed over to another device"
         } else {
             button.toolTip = "MOMENTUM 4 — not connected"
         }
