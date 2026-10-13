@@ -98,7 +98,15 @@ public final class HeadphoneController: ObservableObject {
     @Published public private(set) var state = DeviceState()
 
     private let transport = RFCOMMTransport()
-    private var pending: [UInt16: CheckedContinuation<[UInt8], Error>] = [:]
+    /// In-flight requests by command id, each tagged with a sequence number.
+    ///
+    /// The tag matters: a timeout fires on a timer that is not cancelled when
+    /// the reply arrives, so without it a finished request's timer would later
+    /// find a *different* request under the same command id and fail it. That
+    /// is what made applying an equaliser preset — five 0x1001 writes in a row
+    /// — flash "the headphones did not answer".
+    private var pending: [UInt16: (sequence: UInt64, continuation: CheckedContinuation<[UInt8], Error>)] = [:]
+    private var nextSequence: UInt64 = 0
     private var modeWriteFormat: ModeWriteFormat = .unknown
 
     public init() {
@@ -347,22 +355,27 @@ public final class HeadphoneController: ObservableObject {
             throw TransportError.blockedCommand(reason: reason)
         }
         if let stale = pending.removeValue(forKey: command) {
-            stale.resume(throwing: TransportError.timedOut(command: command))
+            stale.continuation.resume(throwing: TransportError.timedOut(command: command))
         }
 
+        nextSequence += 1
+        let sequence = nextSequence
+
         return try await withCheckedThrowingContinuation { continuation in
-            pending[command] = continuation
+            pending[command] = (sequence, continuation)
             do {
                 try transport.send(GaiaFrame(command: command, payload: payload))
             } catch {
-                pending.removeValue(forKey: command)?.resume(throwing: error)
+                pending.removeValue(forKey: command)?.continuation.resume(throwing: error)
                 return
             }
             Task { [weak self] in
                 try? await Task.sleep(for: timeout)
-                guard let self else { return }
-                self.pending.removeValue(forKey: command)?
-                    .resume(throwing: TransportError.timedOut(command: command))
+                guard let self,
+                      let waiting = self.pending[command],
+                      waiting.sequence == sequence else { return }   // not ours any more
+                self.pending.removeValue(forKey: command)
+                waiting.continuation.resume(throwing: TransportError.timedOut(command: command))
             }
         }
     }
@@ -373,10 +386,11 @@ public final class HeadphoneController: ObservableObject {
         case .notification:
             applyNotification(frame)
         case .success:
-            pending.removeValue(forKey: frame.baseCommand)?.resume(returning: frame.payload)
+            pending.removeValue(forKey: frame.baseCommand)?
+                .continuation.resume(returning: frame.payload)
         case .error:
             pending.removeValue(forKey: frame.baseCommand)?
-                .resume(throwing: TransportError.deviceRejected(
+                .continuation.resume(throwing: TransportError.deviceRejected(
                     command: frame.baseCommand,
                     code: frame.payload.first ?? 0))
         }
@@ -400,7 +414,7 @@ public final class HeadphoneController: ObservableObject {
     private func failAllPending(_ error: Error) {
         let waiting = pending
         pending.removeAll()
-        for (_, continuation) in waiting { continuation.resume(throwing: error) }
+        for (_, entry) in waiting { entry.continuation.resume(throwing: error) }
     }
 
     // MARK: - Diagnostics

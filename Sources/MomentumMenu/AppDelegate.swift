@@ -40,7 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 300, height: 420)
+        // No fixed contentSize: the popover grows and shrinks with its content,
+        // so expanding Advanced Audio Settings is not clipped.
         popover.contentViewController = NSHostingController(rootView: MenuView(controller: controller))
 
         controller.$state

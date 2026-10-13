@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuView: View {
     @ObservedObject var controller: HeadphoneController
     @State private var pendingLevel: Double = 50
+    @State private var showAdvanced = false
 
     private var state: DeviceState { controller.state }
 
@@ -175,26 +176,42 @@ struct MenuView: View {
                     }
                 }
             } else {
-                ForEach(state.bands) { band in
-                    HStack(spacing: 8) {
-                        Text(band.label)
-                            .font(.caption2.monospacedDigit())
-                            .frame(width: 34, alignment: .trailing)
-                            .foregroundStyle(.secondary)
-                        Slider(
-                            value: Binding(
-                                get: { band.gainDb },
-                                set: { value in
-                                    Task { await controller.setBandGain(band: band.id, db: value) }
-                                }
-                            ),
-                            in: state.eqMinGainDb...state.eqMaxGainDb, step: 0.5
-                        )
-                        Text(String(format: "%+.1f", band.gainDb))
-                            .font(.caption2.monospacedDigit())
-                            .frame(width: 34, alignment: .leading)
-                            .foregroundStyle(.secondary)
-                    }
+                // Per-band parametric gains are not what most people want from
+                // a menu bar: the presets are. Tucked away, but one click deep
+                // rather than absent.
+                DisclosureGroup(isExpanded: $showAdvanced) {
+                    bandSliders.padding(.top, 6)
+                } label: {
+                    Text("Advanced Audio Settings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .disclosureGroupStyle(.automatic)
+            }
+        }
+    }
+
+    private var bandSliders: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(state.bands) { band in
+                HStack(spacing: 8) {
+                    Text(band.label)
+                        .font(.caption2.monospacedDigit())
+                        .frame(width: 34, alignment: .trailing)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { band.gainDb },
+                            set: { value in
+                                Task { await controller.setBandGain(band: band.id, db: value) }
+                            }
+                        ),
+                        in: state.eqMinGainDb...state.eqMaxGainDb, step: 0.5
+                    )
+                    Text(String(format: "%+.1f", band.gainDb))
+                        .font(.caption2.monospacedDigit())
+                        .frame(width: 34, alignment: .leading)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
