@@ -146,22 +146,42 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("NOISE CONTROL").font(.caption2).foregroundStyle(.secondary)
 
-            Picker("", selection: Binding(
-                get: { state.noiseMode ?? .off },
-                set: { mode in Task { await controller.setNoiseMode(mode) } }
-            )) {
+            // Hand-rolled rather than Picker(.segmented): that colours the
+            // selection with the system accent, which renders gray if the user
+            // has picked graphite.
+            HStack(spacing: 0) {
                 ForEach(NoiseMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    let isSelected = (state.noiseMode ?? .off) == mode
+                    Button {
+                        Task { await controller.setNoiseMode(mode) }
+                    } label: {
+                        Text(mode.rawValue)
+                            .font(.caption)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                            .background(isSelected ? Color.accentColor : Color.clear)
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(mode.explanation)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .background(Color.primary.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+            )
 
             if state.noiseMode == .custom {
                 VStack(alignment: .leading, spacing: 2) {
-                    Slider(value: $pendingLevel, in: 0...100, step: 1) { editing in
+                    // No `step:`. NSSlider draws a tick per step, so stepping
+                    // by 1 over 0...100 covers the track in a hundred of them.
+                    // Rounding happens on the way to the device instead.
+                    Slider(value: $pendingLevel, in: 0...100) { editing in
                         if !editing {
-                            Task { await controller.setNoiseLevel(Int(pendingLevel)) }
+                            Task { await controller.setNoiseLevel(Int(pendingLevel.rounded())) }
                         }
                     }
                     HStack {
@@ -290,13 +310,20 @@ struct MenuView: View {
                             }
                         ),
                         in: state.eqMinGainDb...state.eqMaxGainDb,
-                        step: 0.1,
                         onEditingChanged: { editing in
                             guard !editing else { return }
-                            let value = shownGain(band)
+                            // Snap to the device's own 0.1 dB granularity here
+                            // rather than via `step:`, which would draw 120
+                            // tick marks across the track.
+                            let value = (shownGain(band) * 10).rounded() / 10
+                            if shownGains.indices.contains(band.id) {
+                                shownGains[band.id] = value
+                            }
                             Task { await controller.setBandGain(band: band.id, db: value) }
                         }
                     )
+                    // Five stacked rows: the full-size knob dwarfs them.
+                    .controlSize(.small)
                     Text(String(format: "%+.1f", shownGain(band)))
                         .font(.caption2.monospacedDigit())
                         .frame(width: 34, alignment: .leading)

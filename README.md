@@ -7,6 +7,10 @@ Sennheiser's Smart Control Plus app is iPhone-only — the App Store listing say
 small native alternative for the things you actually reach for day to day:
 battery, noise control and the equaliser.
 
+<p align="center">
+  <img src="docs/popover.png" alt="The Momentum Menu popover: battery and charging state, noise control, equaliser presets and the parametric bands under Advanced Audio Settings." width="380">
+</p>
+
 **Not affiliated with, endorsed by, or supported by Sennheiser or Sonova.**
 Sennheiser and MOMENTUM are trademarks of their respective owners. This project
 is an independent, interoperable client for headphones you already own.
