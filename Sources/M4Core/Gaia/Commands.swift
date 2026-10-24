@@ -21,6 +21,7 @@ enum Cmd {
     /// So 0x0682 (charging) is feature 3, 0x1A05 (ANC) is 13, 0x1003 (EQ) is 8.
     enum Feature {
         static let battery: UInt8 = 3       // includes the charging push
+        static let audio: UInt8 = 4         // codec and sample-rate pushes
         static let userEq: UInt8 = 8
         static let transparency: UInt8 = 12
         static let anc: UInt8 = 13
@@ -37,6 +38,16 @@ enum Cmd {
     /// device send the current state straight away, so the state is known from
     /// connect onwards rather than only after the cable next moves.
     static let chargingNotification: UInt16 = 0x0602
+
+    // Audio stream ------------------------------------------------------
+    /// -> [] ; <- [codec]. Also pushed as 0x0880. Describes whatever the
+    /// headphones are playing, from any source. Values are Smart Control's
+    /// `Sound_CodecUsed` enum (see `AudioCodec`); 0xFF = no stream. Captured on
+    /// FW 3.38.3 (M4C `2026-09-19_fw3.38.3_codec.json`). An even id that reads.
+    static let getCodec: UInt16 = 0x0800
+    /// Push only, as 0x089A: sample rate as u32 BE in Hz, 0 when stopped.
+    /// Never sent: no getter is confirmed on a MOMENTUM 4.
+    static let sampleRate: UInt16 = 0x081A
 
     // Noise control -----------------------------------------------------
     /// -> [] ; <- [0/1]. The "Off" leg of the app's three-way control.
@@ -152,7 +163,7 @@ enum CommandSafety {
     private static let allowed: [UInt16: ([UInt8]) -> Bool] = {
         let read: ([UInt8]) -> Bool = { $0.count <= 1 }
         let flag: ([UInt8]) -> Bool = { $0 == [0] || $0 == [1] }
-        let features: Set<UInt8> = [Cmd.Feature.battery, Cmd.Feature.userEq,
+        let features: Set<UInt8> = [Cmd.Feature.battery, Cmd.Feature.audio, Cmd.Feature.userEq,
                                     Cmd.Feature.transparency, Cmd.Feature.anc]
         var rules: [UInt16: ([UInt8]) -> Bool] = [
             Cmd.registerNotification: { $0.count == 1 && features.contains($0[0]) },
@@ -173,7 +184,7 @@ enum CommandSafety {
         // Strictly empty: this group sits beside ids that act on a device
         // index, and "an id that answers an indexed payload with an empty OK
         // is an action" (omarchy-momentum4 PROTOCOL.md).
-        for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall] {
+        for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall, Cmd.getCodec] {
             rules[id] = { $0.isEmpty }
         }
         for id in [Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable,

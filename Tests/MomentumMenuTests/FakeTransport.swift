@@ -80,6 +80,8 @@ final class FakeHeadset {
     ]
     /// Setting ids, getter or setter, that the device rejects.
     var rejects: Set<UInt16> = []
+    /// What `0x0800` answers: AAC.
+    var codec: UInt8 = 1
 
     var mode: NoiseMode { anc == 0 ? .off : (modeTable[5] == 1 ? .adaptive : .custom) }
     var curve: [Double] { bands.map(Gain.decode) }
@@ -122,6 +124,7 @@ final class FakeHeadset {
         case Cmd.getBassBoost: return [Reply.ok(frame.command, [bass])]
         case Cmd.setBassBoost: bass = value
         case Cmd.getAllGains: return [Reply.ok(frame.command, bands)]
+        case Cmd.getCodec: return [Reply.ok(frame.command, [codec])]
         case Cmd.setBandGain: bands[Int(value)] = frame.payload[1]
         default: return Reply.device(battery: 50)(frame)
         }

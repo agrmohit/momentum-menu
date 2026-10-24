@@ -97,6 +97,11 @@ struct MenuView: View {
                 } else if state.connected {
                     Text("Battery unknown").font(.caption).foregroundStyle(.secondary)
                 }
+                // From the headphones, so it covers whichever device is playing.
+                if state.connected, let stream = state.streamLabel {
+                    Text(stream).font(.caption).foregroundStyle(.secondary)
+                        .help("What the headphones are playing, from whichever device")
+                }
             }
             Spacer()
             Button {

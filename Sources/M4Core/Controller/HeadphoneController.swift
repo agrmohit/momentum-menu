@@ -92,6 +92,13 @@ public enum DeviceSetting: CaseIterable, Sendable {
     }
 }
 
+/// Smart Control's `Sound_CodecUsed` names, by value (`m4.json`).
+enum AudioCodec {
+    static let names = ["SBC", "AAC", "aptX", "aptX LL", "MP3", "aptX HD",
+                        "FastStream", "LHDC", "aptX Adaptive", "aptX Lossless", "LC3"]
+    static let none: UInt8 = 0xFF
+}
+
 public struct EqBand: Identifiable, Sendable {
     public let id: Int
     public let frequencyHz: Int
@@ -157,6 +164,10 @@ public struct DeviceState: Sendable {
     public var isCharging: Bool?
     /// 0 = full ANC ... 100 = full transparency
     public var noiseLevel: Int?
+    /// The playing stream's codec, raw; see `AudioCodec`.
+    public var codec: UInt8?
+    /// Hz; 0 when the stream has stopped.
+    public var sampleRateHz: Int?
     public var bassBoost: Bool?
     /// True means on (touch controls: enabled). Missing means unknown, or
     /// not on this firmware.
@@ -187,6 +198,15 @@ public struct DeviceState: Sendable {
     public var chargeLabel: String? {
         guard isCharging == true else { return nil }
         return isFullyCharged ? "Charged" : "Charging"
+    }
+
+    /// "AAC · 44.1 kHz", or nil when nothing is playing or the codec is unknown.
+    public var streamLabel: String? {
+        guard let codec, codec != AudioCodec.none else { return nil }
+        let name = Int(codec) < AudioCodec.names.count ? AudioCodec.names[Int(codec)] : "Codec \(codec)"
+        guard let rate = sampleRateHz, rate > 0 else { return name }
+        let khz = String(format: "%g", Double(rate) / 1000)
+        return "\(name) · \(khz) kHz"
     }
 
     /// True when the device is running firmware old enough to lack the
@@ -341,6 +361,8 @@ public final class HeadphoneController: ObservableObject {
         state.connected = false
         state.batteryPercent = nil
         state.isCharging = nil
+        state.codec = nil
+        state.sampleRateHz = nil
     }
 
     /// Hands the headphones over: drops the Mac's Bluetooth link entirely so
@@ -375,13 +397,14 @@ public final class HeadphoneController: ObservableObject {
     /// The device sends nothing to a client that has not asked. That is why
     /// charging appeared undetectable: it is announced, but only to
     /// subscribers, and we were not one. Battery (3) carries the charging
-    /// push; the rest keep the menu honest when the phone app or the
-    /// headset's own controls change something.
+    /// push, audio (4) the codec and sample rate; the rest keep the menu
+    /// honest when the phone app or the headset's own controls change
+    /// something.
     ///
     /// Failures are ignored: an unsupported feature is not a reason to refuse
     /// to connect.
     private func registerForNotifications() async {
-        for feature in [Cmd.Feature.battery, Cmd.Feature.anc,
+        for feature in [Cmd.Feature.battery, Cmd.Feature.audio, Cmd.Feature.anc,
                         Cmd.Feature.userEq, Cmd.Feature.transparency] {
             _ = try? await request(Cmd.registerNotification,
                                    payload: [feature],
@@ -400,6 +423,7 @@ public final class HeadphoneController: ObservableObject {
         guard state.connected else { return }
 
         state.batteryPercent = (try? await request(Cmd.getBattery).first).map { Int($0) }
+        if let codec = try? await request(Cmd.getCodec).first { state.codec = codec }
 
         var mark = userChangesFinished
         if let anc = try? await request(Cmd.getAncEnabled).first {
@@ -799,6 +823,12 @@ public final class HeadphoneController: ObservableObject {
             }
         case Cmd.getBassBoost:
             if let value = frame.payload.first { state.bassBoost = value != 0 }
+        case Cmd.getCodec:
+            if let value = frame.payload.first { state.codec = value }
+        case Cmd.sampleRate:
+            if frame.payload.count == 4 {
+                state.sampleRateHz = frame.payload.reduce(0) { $0 << 8 | Int($1) }
+            }
         case Cmd.chargingNotification:
             if let value = frame.payload.first {
                 state.isCharging = value != 0

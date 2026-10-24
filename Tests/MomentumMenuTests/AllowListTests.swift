@@ -65,6 +65,11 @@ final class AllowListTests: XCTestCase {
         Row(name: "0x0817 next to Comfort Calls", command: 0x0817, payload: [0], allowed: false),
         Row(name: "0x0402 next to on-head", command: 0x0402, payload: [], allowed: false),
         Row(name: "0x0403 in the swept on-head range", command: 0x0403, payload: [], allowed: false),
+        Row(name: "codec read", command: Cmd.getCodec, payload: [], allowed: true),
+        Row(name: "codec read with a byte", command: Cmd.getCodec, payload: [0], allowed: false),
+        Row(name: "sample rate, push only", command: Cmd.sampleRate, payload: [], allowed: false),
+        Row(name: "subscribe to stream pushes", command: Cmd.registerNotification, payload: [4], allowed: true),
+        Row(name: "power off, reproduced three times", command: 0x0605, payload: [], allowed: false),
         // Every rule is about Sennheiser's ids; another vendor's are refused.
         Row(name: "an allowed read under Qualcomm's vendor", command: Cmd.getBattery, payload: [],
             allowed: false, vendor: 0x001D),
