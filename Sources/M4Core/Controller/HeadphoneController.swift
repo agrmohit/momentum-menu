@@ -105,6 +105,7 @@ public enum BluetoothDiagnostics {
 
     /// Channels 1 and 2 are where GAIA has been seen; 14 is the other
     /// RFCOMM service this device advertises. Hands-Free (10) is left alone.
+    @MainActor
     public static func probeChannels() async -> String {
         await RFCOMMTransport().probeChannels([1, 2, 14])
     }

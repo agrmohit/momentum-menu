@@ -4,6 +4,7 @@ import Foundation
 ///
 /// `RFCOMMTransport` is the only real one. Tests supply a fake, so the
 /// controller's request and state logic can be exercised without Bluetooth.
+@MainActor
 protocol GaiaTransport: AnyObject {
     /// Called for every decoded frame, on the main thread.
     var onFrame: ((GaiaFrame) -> Void)? { get set }

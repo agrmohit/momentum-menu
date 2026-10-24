@@ -45,11 +45,16 @@ public enum TransportError: LocalizedError {
 /// Bluetooth Classic RFCOMM is macOS-only territory — iOS reserves it for
 /// MFi-licensed accessories, which is exactly why this app can exist on the
 /// Mac but the equivalent could not be built on iPhone.
+///
+/// Main-actor isolated because IOBluetooth calls the delegate on the main run
+/// loop. The pending continuations are set by `connect` and cleared by those
+/// callbacks or a timeout, so all three must run on the same thread.
+@MainActor
 final class RFCOMMTransport: NSObject {
 
     /// The headset's GAIA service. NOT the Apple iAP2 UUID
     /// (00000000-DECA-FADE-DECA-DEAFDECACAFF), which sits alongside it.
-    static let gaiaServiceUUID = UUID(uuidString: "A2129FF3-081B-4C45-8AFE-469D9C4842EC")!
+    nonisolated static let gaiaServiceUUID = UUID(uuidString: "A2129FF3-081B-4C45-8AFE-469D9C4842EC")!
 
     /// Matched against the device name as a sanity check only; the real test
     /// is whether the device advertises GAIA.
@@ -74,7 +79,7 @@ final class RFCOMMTransport: NSObject {
     var isOpen: Bool { channel?.isOpen() ?? false }
     var deviceName: String? { device?.name }
 
-    private static func sdpUUID() -> IOBluetoothSDPUUID {
+    private nonisolated static func sdpUUID() -> IOBluetoothSDPUUID {
         var raw = gaiaServiceUUID.uuid
         return withUnsafeBytes(of: &raw) { buffer in
             IOBluetoothSDPUUID(bytes: buffer.baseAddress!, length: buffer.count)
@@ -145,7 +150,8 @@ final class RFCOMMTransport: NSObject {
                 continuation.resume()
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(10))
                 guard let self, let pending = self.sdpContinuation else { return }
                 self.sdpContinuation = nil
                 pending.resume()
@@ -225,7 +231,8 @@ final class RFCOMMTransport: NSObject {
                 continuation.resume(returning: false)
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
                 guard !settled else { return }
                 settled = true
                 continuation.resume(returning: false)
@@ -236,7 +243,8 @@ final class RFCOMMTransport: NSObject {
     private func awaitOpenComplete(timeoutSeconds: Double) async -> IOReturn {
         await withCheckedContinuation { continuation in
             openContinuation = continuation
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeoutSeconds) { [weak self] in
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
                 guard let self, let pending = self.openContinuation else { return }
                 self.openContinuation = nil
                 pending.resume(returning: kIOReturnTimeout)
@@ -257,8 +265,8 @@ final class RFCOMMTransport: NSObject {
 
     /// Dumps what macOS currently knows about every paired device, so a
     /// failure to find the headphones can be told apart from a failure to open
-    /// their control channel. Read-only.
-    static func inventory() -> String {
+    /// their control channel. Read-only, and opens nothing, so any thread.
+    nonisolated static func inventory() -> String {
         guard let paired = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] else {
             return "macOS returned no paired-device list at all."
         }
@@ -339,7 +347,8 @@ final class RFCOMMTransport: NSObject {
     }
 
     func send(_ frame: GaiaFrame) throws {
-        if let reason = CommandSafety.rejectionReason(for: frame.command, payload: frame.payload) {
+        if let reason = CommandSafety.rejectionReason(for: frame.command, payload: frame.payload,
+                                                      vendor: frame.vendor) {
             throw TransportError.blockedCommand(reason: reason)
         }
         guard let channel, channel.isOpen() else { throw TransportError.notConnected }
@@ -352,7 +361,9 @@ final class RFCOMMTransport: NSObject {
     }
 }
 
-extension RFCOMMTransport: IOBluetoothRFCOMMChannelDelegate {
+// `@preconcurrency`: the delegate protocol predates actors. IOBluetooth calls
+// it on the main thread, and the runtime traps if that ever changes.
+extension RFCOMMTransport: @preconcurrency IOBluetoothRFCOMMChannelDelegate {
 
     func rfcommChannelData(_ rfcommChannel: IOBluetoothRFCOMMChannel!,
                            data dataPointer: UnsafeMutableRawPointer!,

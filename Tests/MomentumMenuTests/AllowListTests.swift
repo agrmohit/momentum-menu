@@ -13,6 +13,7 @@ final class AllowListTests: XCTestCase {
         let command: UInt16
         let payload: [UInt8]
         let allowed: Bool
+        var vendor = GaiaFrame.vendorSennheiser
     }
 
     private static let rows: [Row] = [
@@ -41,6 +42,12 @@ final class AllowListTests: XCTestCase {
         Row(name: "mode table with ids out of order", command: Cmd.setModeTable,
             payload: [3, 1, 1, 0, 2, 0], allowed: false),
         Row(name: "pair for a mode the app never writes", command: Cmd.setModeTable, payload: [1, 2], allowed: false),
+        // Every rule is about Sennheiser's ids; another vendor's are refused.
+        Row(name: "an allowed read under Qualcomm's vendor", command: Cmd.getBattery, payload: [],
+            allowed: false, vendor: 0x001D),
+        Row(name: "an allowed write under Qualcomm's vendor", command: Cmd.setAncEnabled, payload: [1],
+            allowed: false, vendor: 0x001D),
+        Row(name: "Qualcomm's battery read", command: 0x1A00, payload: [], allowed: false, vendor: 0x001D),
         Row(name: "subscribe to battery", command: Cmd.registerNotification, payload: [3], allowed: true),
         Row(name: "subscribe to an unknown feature", command: Cmd.registerNotification, payload: [20], allowed: false),
         // Documented elsewhere as dangerous; never sent by the app.
@@ -56,7 +63,7 @@ final class AllowListTests: XCTestCase {
 
     func testOnlyListedCommandsAndPayloadsPass() {
         for row in Self.rows {
-            let reason = CommandSafety.rejectionReason(for: row.command, payload: row.payload)
+            let reason = CommandSafety.rejectionReason(for: row.command, payload: row.payload, vendor: row.vendor)
             XCTAssertEqual(reason == nil, row.allowed, "\(row.name): \(reason ?? "allowed")")
         }
     }

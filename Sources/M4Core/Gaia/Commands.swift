@@ -155,7 +155,14 @@ enum CommandSafety {
         return rules
     }()
 
-    static func rejectionReason(for command: UInt16, payload: [UInt8]) -> String? {
+    /// Every rule here is about Sennheiser's ids. Under another vendor the same
+    /// id means something else (Qualcomm's 0x1A00 is a battery read), so any
+    /// other vendor is refused outright.
+    static func rejectionReason(for command: UInt16, payload: [UInt8],
+                                vendor: UInt16 = GaiaFrame.vendorSennheiser) -> String? {
+        guard vendor == GaiaFrame.vendorSennheiser else {
+            return String(format: "0x%04X:0x%04X is not a command this app sends", vendor, command)
+        }
         if let reason = rejectionReason(for: command) { return reason }
         guard let rule = allowed[command] else {
             return String(format: "0x%04X is not a command this app sends", command)
