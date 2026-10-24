@@ -146,33 +146,10 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("NOISE CONTROL").font(.caption2).foregroundStyle(.secondary)
 
-            // Hand-rolled rather than Picker(.segmented): that colours the
-            // selection with the system accent, which renders gray if the user
-            // has picked graphite.
-            HStack(spacing: 0) {
-                ForEach(NoiseMode.allCases, id: \.self) { mode in
-                    let isSelected = (state.noiseMode ?? .off) == mode
-                    Button {
-                        Task { await controller.setNoiseMode(mode) }
-                    } label: {
-                        Text(mode.rawValue)
-                            .font(.caption)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                            .background(isSelected ? Color.accentColor : Color.clear)
-                            .foregroundStyle(isSelected ? Color.white : Color.primary)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(mode.explanation)
-                }
+            segmented(NoiseMode.allCases, selected: state.noiseMode ?? .off,
+                      label: \.rawValue, help: \.explanation) { mode in
+                Task { await controller.setNoiseMode(mode) }
             }
-            .background(Color.primary.opacity(0.07))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-            )
 
             if state.noiseMode == .custom {
                 VStack(alignment: .leading, spacing: 2) {
@@ -190,10 +167,54 @@ struct MenuView: View {
                         Text("Transparency").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
+                // Custom only, as in omarchy-momentum4's panel.
+                if let antiWind = state.antiWind {
+                    HStack(spacing: 8) {
+                        Text("Anti-wind").font(.caption).foregroundStyle(.secondary)
+                        segmented(AntiWind.shown, selected: antiWind, label: \.label,
+                                  help: { _ in "Reduces wind noise picked up by the microphones" }) { setting in
+                            guard setting != antiWind else { return }
+                            Task { await controller.setAntiWind(setting) }
+                        }
+                    }
+                }
             } else if let mode = state.noiseMode {
                 Text(mode.explanation).font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Hand-rolled rather than Picker(.segmented): that colours the selection
+    /// with the system accent, which renders gray if the user has picked
+    /// graphite.
+    private func segmented<Option: Hashable>(_ options: [Option], selected: Option,
+                                             label: @escaping (Option) -> String,
+                                             help: @escaping (Option) -> String,
+                                             choose: @escaping (Option) -> Void) -> some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = option == selected
+                Button {
+                    choose(option)
+                } label: {
+                    Text(label(option))
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .background(isSelected ? Color.accentColor : Color.clear)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(help(option))
+            }
+        }
+        .background(Color.primary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Equaliser

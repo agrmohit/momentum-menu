@@ -65,6 +65,11 @@ final class FakeHeadset {
     var modeTableReply: [UInt8]?
     /// How long a mode-table read takes to answer.
     var modeTableDelay: Duration = .zero
+    /// The level any mode-table write leaves behind, as FW 3.37.3 does with 0.
+    /// Nil leaves the level alone.
+    var levelAfterModeWrite: UInt8?
+    /// True models firmware that rejects a whole-table write.
+    var rejectsFullTable = false
     /// Every mode-table write, as sent.
     private(set) var modeWrites: [[UInt8]] = []
 
@@ -94,8 +99,10 @@ final class FakeHeadset {
                     modeTable[index + 1] = frame.payload[1]
                 }
             } else {
+                guard !rejectsFullTable else { return [Reply.rejected(frame.command)] }
                 modeTable = frame.payload
             }
+            if let reset = levelAfterModeWrite { level = reset }
         case Cmd.getNoiseLevel: return [Reply.ok(frame.command, [level])]
         case Cmd.setNoiseLevel: level = value
         case Cmd.getBassBoost: return [Reply.ok(frame.command, [bass])]

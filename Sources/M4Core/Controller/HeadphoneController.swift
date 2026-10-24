@@ -17,6 +17,25 @@ public enum NoiseMode: String, CaseIterable, Sendable {
     }
 }
 
+/// Byte 1 of the mode table. Three states, so "on" is not one of them:
+/// writing 1 for on would silently replace Auto with Max.
+public enum AntiWind: UInt8, Sendable {
+    case off = 0
+    case max = 1
+    case auto = 2
+
+    /// In the order Smart Control shows them.
+    public static let shown: [AntiWind] = [.off, .auto, .max]
+
+    public var label: String {
+        switch self {
+        case .off: return "Off"
+        case .max: return "Max"
+        case .auto: return "Auto"
+        }
+    }
+}
+
 public struct EqBand: Identifiable, Sendable {
     public let id: Int
     public let frequencyHz: Int
@@ -76,6 +95,7 @@ public struct DeviceState: Sendable {
     public var deviceName: String?
     public var batteryPercent: Int?
     public var noiseMode: NoiseMode?
+    public var antiWind: AntiWind?
     /// nil means unknown rather than "not charging": the device only announces
     /// this when the cable changes, and offers no way to ask.
     public var isCharging: Bool?
@@ -156,6 +176,10 @@ public final class HeadphoneController: ObservableObject {
     /// The last request queued for each command. Each waits for the one before it.
     private var lastRequest: [UInt16: Task<Void, Never>] = [:]
     private var modeWriteFormat: ModeWriteFormat = .unknown
+    /// The last mode-table edit queued. Each waits for the one before it,
+    /// because an edit reads the table and writes it back: two at once would
+    /// each write back the other's stale entry.
+    private var lastModeTableEdit: Task<Void, Never>?
     /// Presets still being written. While any are, equaliser pushes are
     /// ignored: they are the device echoing a partially applied curve, which is
     /// not worth showing anyone. A count, not a flag, because presets can
@@ -324,6 +348,7 @@ public final class HeadphoneController: ObservableObject {
             let adaptive = table.flatMap { Self.modeValue(in: $0, id: Cmd.modeAdaptive) } == 1
             if userChangesFinished == mark {
                 state.noiseMode = anc != 0 ? (adaptive ? .adaptive : .custom) : .off
+                state.antiWind = table.flatMap(Self.antiWind(in:))
             }
         }
         mark = userChangesFinished
@@ -407,6 +432,17 @@ public final class HeadphoneController: ObservableObject {
             state.lastError = nil
         } catch {
             guard click == noiseModeClicks else { return }
+            state.lastError = error.localizedDescription
+        }
+    }
+
+    public func setAntiWind(_ setting: AntiWind) async {
+        defer { userChangesFinished += 1 }
+        do {
+            try await writeMode(id: Cmd.modeAntiWind, value: setting.rawValue)
+            state.antiWind = setting
+            state.lastError = nil
+        } catch {
             state.lastError = error.localizedDescription
         }
     }
@@ -498,18 +534,29 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
-    /// Writes one entry of the 0x1A01 mode table.
-    ///
-    /// The two reference implementations disagree about what this command
-    /// accepts: one sends a bare [id, value] pair, the other says the device
-    /// rejects partial writes and needs the whole table back. We try the short
-    /// form once, and on a rejection fall back to read-modify-write and
-    /// remember that for the rest of the session.
+    /// Writes one entry of the 0x1A01 mode table, after any edit already queued.
     private func writeMode(id: UInt8, value: UInt8) async throws {
-        if modeWriteFormat != .fullTable {
+        let previous = lastModeTableEdit
+        let edit = Task { () throws in
+            await previous?.value
+            try await patchModeTable(id: id, value: value)
+        }
+        lastModeTableEdit = Task { _ = try? await edit.value }
+        try await edit.value
+    }
+
+    /// The two reference implementations disagree about what 0x1A00 accepts:
+    /// one sends a bare [id, value] pair, the other says the device rejects
+    /// partial writes and needs the whole table back. For the adaptive entry
+    /// we try the short form once, and on a rejection fall back to
+    /// read-modify-write and remember that for the rest of the session. Every
+    /// other entry is only ever written as the whole table.
+    private func patchModeTable(id: UInt8, value: UInt8) async throws {
+        if id == Cmd.modeAdaptive, modeWriteFormat != .fullTable {
             do {
                 _ = try await request(Cmd.setModeTable, payload: [id, value])
                 modeWriteFormat = .singlePair
+                await rereadNoiseLevel()
                 return
             } catch let error as TransportError {
                 guard case .deviceRejected = error else { throw error }
@@ -523,12 +570,29 @@ public final class HeadphoneController: ObservableObject {
         guard Cmd.isFullModeTable(table) else {
             throw TransportError.unexpectedReply(command: Cmd.getModeTable)
         }
+        // Every write has a side effect (see rereadNoiseLevel), so skip a no-op.
+        guard Self.modeValue(in: table, id: id) != value else { return }
         var index = 0
         while index + 1 < table.count {
             if table[index] == id { table[index + 1] = value }
             index += 2
         }
         _ = try await request(Cmd.setModeTable, payload: table)
+        await rereadNoiseLevel()
+    }
+
+    /// Any mode-table write, even an unchanged one, set the level to 0 on
+    /// FW 3.37.3 (M4C captures). Reads it back so the slider shows the truth.
+    private func rereadNoiseLevel() async {
+        let mark = userChangesFinished
+        let level = try? await request(Cmd.getNoiseLevel).first
+        if let level, userChangesFinished == mark { state.noiseLevel = Int(level) }
+    }
+
+    /// Nil unless the table has the one shape seen on the wire and a known value.
+    private static func antiWind(in table: [UInt8]) -> AntiWind? {
+        guard Cmd.isFullModeTable(table) else { return nil }
+        return AntiWind(rawValue: table[1])
     }
 
     private static func modeValue(in table: [UInt8], id: UInt8) -> UInt8? {
@@ -640,6 +704,7 @@ public final class HeadphoneController: ObservableObject {
                let adaptive = Self.modeValue(in: frame.payload, id: Cmd.modeAdaptive) {
                 state.noiseMode = adaptive == 1 ? .adaptive : .custom
             }
+            if let antiWind = Self.antiWind(in: frame.payload) { state.antiWind = antiWind }
         case Cmd.getBandGain:
             // Pushed as the whole curve, one gain per band. Ignored mid-preset:
             // those are half-applied curves and showing them is the scatter.
