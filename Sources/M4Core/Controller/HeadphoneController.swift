@@ -36,16 +36,35 @@ public struct EqPreset: Identifiable, Sendable {
     /// True only for curves confirmed against Smart Control's own values.
     public let verified: Bool
 
-    /// Confirmed: Smart Control's Pop preset reads 0/20/25/15/-20 on the wire.
-    public static let pop = EqPreset(name: "Pop", gains: [0, 2.0, 2.5, 1.5, -2.0], verified: true)
-    public static let flat = EqPreset(name: "Flat", gains: [0, 0, 0, 0, 0], verified: true)
+    /// Smart Control's presets, as transcribed from the app in
+    /// omarchy-momentum4's `presets.json`. The device stores only the active
+    /// curve; the app ticks a preset whose exact curve is written.
+    public static let sennheiser: [EqPreset] = [
+        EqPreset(name: "Neutral", gains: [0, 0, 0, 0, 0], verified: true),
+        EqPreset(name: "Rock", gains: [0, 2, 2.5, 1.5, -2], verified: true),
+        EqPreset(name: "Pop", gains: [0, -2.5, 0, 2.5, 0], verified: true),
+        EqPreset(name: "Dance", gains: [3.5, 2, -1.5, 1.5, 3], verified: true),
+        EqPreset(name: "Hip-Hop", gains: [3, 1.5, -1.5, 0, -1.5], verified: true),
+        EqPreset(name: "Classical", gains: [-2, -1.5, 0, 3.5, 4], verified: true),
+        EqPreset(name: "Movie", gains: [0, 0, 2, 2, -2], verified: true),
+        EqPreset(name: "Jazz", gains: [-3.2, 0, 2.2, 2.2, 0], verified: true),
+    ]
 
     /// Curves of our own, not Sennheiser's. Labelled as such in the UI.
-    public static let bassLift = EqPreset(name: "Bass lift", gains: [4.0, 2.0, 0, 0, 0], verified: false)
-    public static let voice = EqPreset(name: "Voice", gains: [-2.0, 0, 2.0, 2.5, 0], verified: false)
-    public static let treble = EqPreset(name: "Treble", gains: [0, 0, 0, 2.0, 3.0], verified: false)
+    public static let own: [EqPreset] = [
+        EqPreset(name: "Bass lift", gains: [4.0, 2.0, 0, 0, 0], verified: false),
+        EqPreset(name: "Voice", gains: [-2.0, 0, 2.0, 2.5, 0], verified: false),
+        EqPreset(name: "Treble", gains: [0, 0, 0, 2.0, 3.0], verified: false),
+    ]
 
-    public static let all: [EqPreset] = [.flat, .pop, .bassLift, .voice, .treble]
+    public static let all: [EqPreset] = sennheiser + own
+
+    /// The preset whose curve the device holds, compared in the device's
+    /// 0.1 dB steps. Nil for a hand-made curve.
+    public static func matching(_ gains: [Double]) -> EqPreset? {
+        let tenths = { (curve: [Double]) in curve.map { Int(($0 * 10).rounded()) } }
+        return all.first { tenths($0.gains) == tenths(gains) }
+    }
 }
 
 public struct DeviceState: Sendable {

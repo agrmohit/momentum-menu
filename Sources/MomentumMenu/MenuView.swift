@@ -213,19 +213,27 @@ struct MenuView: View {
                 }
             }
 
-            HStack(spacing: 4) {
+            // Four to a row: eight of Sennheiser's, then our own.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
                 ForEach(state.equaliserSupported ? EqPreset.all : []) { preset in
+                    let isActive = preset.name == activePreset?.name
                     Button {
                         Task { await controller.apply(preset) }
                     } label: {
+                        // Filled like the selected segment above: a tinted
+                        // bordered button barely differs from the rest.
                         Text(preset.name)
                             .font(.caption2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)   // share the width evenly
+                            .padding(.vertical, 3)
+                            .background(isActive ? Color.accentColor : Color.primary.opacity(0.1))
+                            .foregroundStyle(isActive ? Color.white : Color.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(.plain)
                     .help(preset.verified
                           ? "Matches Sennheiser's own \(preset.name) curve"
                           : "Our own curve, not one of Sennheiser's presets")
@@ -332,6 +340,9 @@ struct MenuView: View {
             }
         }
     }
+
+    /// Judged on the device's curve, not the sliders mid-animation.
+    private var activePreset: EqPreset? { EqPreset.matching(state.bands.map(\.gainDb)) }
 
     private func shownGain(_ band: EqBand) -> Double {
         shownGains.indices.contains(band.id) ? shownGains[band.id] : band.gainDb

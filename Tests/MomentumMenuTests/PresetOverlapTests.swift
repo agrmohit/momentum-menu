@@ -9,6 +9,14 @@ import XCTest
 /// the first of two overlapping presets unmute the second one's echoes; and a
 /// slider moved mid-preset was overwritten on the device by the preset's later
 /// write for that band, while the popover kept showing the slider value.
+/// Fixed curves, so these rows do not move when the preset catalogue does.
+private extension EqPreset {
+    static let pop = EqPreset(name: "Pop", gains: [0, 2.0, 2.5, 1.5, -2.0], verified: true)
+    static let bassLift = EqPreset(name: "Bass lift", gains: [4.0, 2.0, 0, 0, 0], verified: false)
+    static let voice = EqPreset(name: "Voice", gains: [-2.0, 0, 2.0, 2.5, 0], verified: false)
+    static let treble = EqPreset(name: "Treble", gains: [0, 0, 0, 2.0, 3.0], verified: false)
+}
+
 @MainActor
 final class PresetOverlapTests: XCTestCase {
 
