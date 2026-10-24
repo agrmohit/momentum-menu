@@ -119,22 +119,50 @@ public final class HeadphoneController: ObservableObject {
     /// Every frame the device sends, for diagnostics. Set before connecting.
     public var frameLogger: ((String) -> Void)?
 
-    private let transport = RFCOMMTransport()
-    /// In-flight requests by command id, each tagged with a sequence number.
+    private let transport: GaiaTransport
+    /// Requests awaiting their reply, at most one per command id, each tagged
+    /// with a sequence number.
     ///
-    /// The tag matters: a timeout fires on a timer that is not cancelled when
-    /// the reply arrives, so without it a finished request's timer would later
-    /// find a *different* request under the same command id and fail it. That
-    /// is what made applying an equaliser preset — five 0x1001 writes in a row
-    /// — flash "the headphones did not answer".
-    private var pending: [UInt16: (sequence: UInt64, continuation: CheckedContinuation<[UInt8], Error>)] = [:]
+    /// One per command because a GAIA reply names only the command, not the
+    /// request. Two requests in flight for the same command cannot be told
+    /// apart, and the second would take the first one's answer. Different
+    /// commands can overlap, so a click never waits behind an unrelated read.
+    ///
+    /// The tag matters too: a timeout fires on a timer that is not cancelled
+    /// when the reply arrives, so without it a finished request's timer would
+    /// later find a *different* request and fail it.
+    private var inFlight: [UInt16: (sequence: UInt64, continuation: CheckedContinuation<[UInt8], Error>)] = [:]
     private var nextSequence: UInt64 = 0
+    /// The last request queued for each command. Each waits for the one before it.
+    private var lastRequest: [UInt16: Task<Void, Never>] = [:]
     private var modeWriteFormat: ModeWriteFormat = .unknown
-    /// While true, equaliser pushes are ignored: they are the device echoing a
-    /// partially applied curve, which is not worth showing anyone.
-    private var isApplyingPreset = false
+    /// Presets still being written. While any are, equaliser pushes are
+    /// ignored: they are the device echoing a partially applied curve, which is
+    /// not worth showing anyone. A count, not a flag, because presets can
+    /// overlap and the first to finish must not unmute the echoes of the rest.
+    private var presetsBeingApplied = 0
+    /// User changes to noise mode, level or bass that have finished.
+    ///
+    /// `refresh()` keeps a reading only if none finished since its read went
+    /// out. Otherwise the device may have answered before the user's write
+    /// landed, and the stale answer would overwrite the user's choice. A change
+    /// that finishes later sets its own state last, so it wins without help.
+    private var userChangesFinished = 0
+    /// Noise-mode clicks so far. Each click keeps its number to tell whether a
+    /// newer one has started since.
+    private var noiseModeClicks = 0
+    /// Equaliser edits (presets and slider moves) so far, and which edit last
+    /// claimed each band. The latest edit of a band is the only one that
+    /// writes it or shows it.
+    private var equaliserEdits = 0
+    private var bandOwner: [Int: Int] = [:]
 
-    public init() {
+    public convenience init() {
+        self.init(transport: RFCOMMTransport())
+    }
+
+    init(transport: GaiaTransport) {
+        self.transport = transport
         transport.onFrame = { [weak self] frame in
             MainActor.assumeIsolated {
                 self?.log(frame)
@@ -145,7 +173,7 @@ public final class HeadphoneController: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.failAllPending(TransportError.notConnected)
-                self.state.connected = false
+                self.markDisconnected()
             }
         }
     }
@@ -176,6 +204,14 @@ public final class HeadphoneController: ObservableObject {
             state.deviceName = transport.deviceName
             state.lastError = nil
             if state.connected {
+                // Subscribing below is the first write. Other Sennheiser models
+                // share the GAIA service but not this command map.
+                guard await isMomentum4() else {
+                    transport.disconnect()
+                    state.connected = false
+                    state.lastError = "These headphones are not a MOMENTUM 4, so the app leaves them alone."
+                    return
+                }
                 await registerForNotifications()
                 await refresh()
             }
@@ -188,8 +224,20 @@ public final class HeadphoneController: ObservableObject {
     /// Closes the control channel only. The headphones stay connected to this
     /// Mac and audio is unaffected. Used when the app quits.
     public func disconnect() {
+        // The transport closes without its disconnect callback, so nothing
+        // else would release a caller still waiting on a reply.
+        failAllPending(TransportError.notConnected)
         transport.disconnect()
+        markDisconnected()
+    }
+
+    /// The battery and charge readings belong to the link that just closed.
+    /// The popover shows the battery whenever it is set, so keeping them would
+    /// present a stale figure as live.
+    private func markDisconnected() {
         state.connected = false
+        state.batteryPercent = nil
+        state.isCharging = nil
     }
 
     /// Hands the headphones over: drops the Mac's Bluetooth link entirely so
@@ -201,10 +249,20 @@ public final class HeadphoneController: ObservableObject {
     public func releaseHeadphones() {
         failAllPending(TransportError.notConnected)
         transport.releaseLink()
-        state.connected = false
+        markDisconnected()
         state.releasedByUser = true
-        state.batteryPercent = nil
         state.lastError = nil
+    }
+
+    /// True when the connected device is a MOMENTUM 4: its model id's first
+    /// word is "M4AEBT". Only when it does not answer the model id, as older
+    /// firmware may not, does the device name decide.
+    private func isMomentum4() async -> Bool {
+        if let reply = try? await request(Cmd.getModelId), !reply.isEmpty {
+            let model = String(decoding: reply.prefix { $0 != 0 }, as: UTF8.self)
+            return model.split(separator: " ").first == Substring(Cmd.momentum4ModelPrefix)
+        }
+        return transport.deviceName?.contains(RFCOMMTransport.deviceNameMarker) == true
     }
 
     // MARK: - Reading
@@ -240,12 +298,17 @@ public final class HeadphoneController: ObservableObject {
 
         state.batteryPercent = (try? await request(Cmd.getBattery).first).map { Int($0) }
 
+        var mark = userChangesFinished
         if let anc = try? await request(Cmd.getAncEnabled).first {
             let table = try? await request(Cmd.getModeTable)
             let adaptive = table.flatMap { Self.modeValue(in: $0, id: Cmd.modeAdaptive) } == 1
-            state.noiseMode = anc != 0 ? (adaptive ? .adaptive : .custom) : .off
+            if userChangesFinished == mark {
+                state.noiseMode = anc != 0 ? (adaptive ? .adaptive : .custom) : .off
+            }
         }
-        state.noiseLevel = (try? await request(Cmd.getNoiseLevel).first).map { Int($0) }
+        mark = userChangesFinished
+        let level = (try? await request(Cmd.getNoiseLevel).first).map { Int($0) }
+        if userChangesFinished == mark { state.noiseLevel = level }
 
         if let version = try? await request(Cmd.getFirmwareVersion), version.count >= 6 {
             let parts = stride(from: 0, to: 6, by: 2).map { Int(version[$0]) << 8 | Int(version[$0 + 1]) }
@@ -257,7 +320,9 @@ public final class HeadphoneController: ObservableObject {
 
         // Bass boost arrived with firmware 3.x and is rejected outright on 2.x,
         // so a failure here means "not on this firmware", not "broken".
-        state.bassBoost = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
+        mark = userChangesFinished
+        let bass = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
+        if userChangesFinished == mark { state.bassBoost = bass }
 
         state.lastError = nil
     }
@@ -305,27 +370,30 @@ public final class HeadphoneController: ObservableObject {
 
     // MARK: - Writing
 
+    /// A mode is two writes. When a newer click arrives in between, this one
+    /// stops: its second write, or its state update, would undo the newer one.
     public func setNoiseMode(_ mode: NoiseMode) async {
+        defer { userChangesFinished += 1 }
+        noiseModeClicks += 1
+        let click = noiseModeClicks
         do {
-            switch mode {
-            case .off:
-                _ = try await request(Cmd.setAncEnabled, payload: [0])
-            case .adaptive:
-                _ = try await request(Cmd.setAncEnabled, payload: [1])
-                try await writeMode(id: Cmd.modeAdaptive, value: 1)
-            case .custom:
-                _ = try await request(Cmd.setAncEnabled, payload: [1])
-                try await writeMode(id: Cmd.modeAdaptive, value: 0)
+            _ = try await request(Cmd.setAncEnabled, payload: [mode == .off ? 0 : 1])
+            guard click == noiseModeClicks else { return }
+            if mode != .off {
+                try await writeMode(id: Cmd.modeAdaptive, value: mode == .adaptive ? 1 : 0)
+                guard click == noiseModeClicks else { return }
             }
             state.noiseMode = mode
             state.lastError = nil
         } catch {
+            guard click == noiseModeClicks else { return }
             state.lastError = error.localizedDescription
         }
     }
 
     public func setNoiseLevel(_ level: Int) async {
         let clamped = UInt8(max(0, min(100, level)))
+        defer { userChangesFinished += 1 }
         do {
             _ = try await request(Cmd.setNoiseLevel, payload: [clamped])
             state.noiseLevel = Int(clamped)
@@ -338,9 +406,13 @@ public final class HeadphoneController: ObservableObject {
     public func setBandGain(band: Int, db: Double) async {
         // Respect the device's own limits rather than the encoding's.
         let clamped = max(state.eqMinGainDb, min(state.eqMaxGainDb, db))
+        equaliserEdits += 1
+        let edit = equaliserEdits
+        bandOwner[band] = edit
         do {
             _ = try await request(Cmd.setBandGain, payload: [UInt8(band), Gain.encode(db: clamped)])
-            if let index = state.bands.firstIndex(where: { $0.id == band }) {
+            // A preset clicked meanwhile has already shown its own value here.
+            if bandOwner[band] == edit, let index = state.bands.firstIndex(where: { $0.id == band }) {
                 state.bands[index].gainDb = clamped
             }
             state.lastError = nil
@@ -364,17 +436,23 @@ public final class HeadphoneController: ObservableObject {
         // sequential writes take long enough that waiting for them makes the
         // button feel broken.
         //
-        // This is only safe because the flag suppresses equaliser pushes while
+        // This is only safe because the count suppresses equaliser pushes while
         // the writes run. Without it the device's echo of each half-applied
         // curve drags the not-yet-written sliders back, five times over.
-        isApplyingPreset = true
-        defer { isApplyingPreset = false }
+        presetsBeingApplied += 1
+        defer { presetsBeingApplied -= 1 }
 
+        equaliserEdits += 1
+        let edit = equaliserEdits
         for (index, gain) in targets.enumerated() {
             state.bands[index].gainDb = gain
+            bandOwner[index] = edit
         }
 
         for (index, gain) in targets.enumerated() {
+            // A newer preset or slider move owns this band now. Writing ours
+            // would land after theirs and leave the device on an older choice.
+            guard bandOwner[index] == edit else { continue }
             do {
                 _ = try await request(Cmd.setBandGain,
                                       payload: [UInt8(index), Gain.encode(db: gain)])
@@ -390,6 +468,7 @@ public final class HeadphoneController: ObservableObject {
     }
 
     public func setBassBoost(_ enabled: Bool) async {
+        defer { userChangesFinished += 1 }
         do {
             _ = try await request(Cmd.setBassBoost, payload: [enabled ? 1 : 0])
             state.bassBoost = enabled
@@ -418,8 +497,12 @@ public final class HeadphoneController: ObservableObject {
             }
         }
 
-        var table = try await request(Cmd.getModeTable)
-        guard table.count >= 2, table.count % 2 == 0 else { return }
+        // The table is written straight back, so a misread here would reset the
+        // other modes. Replies take 17-40 ms in captures; other tools wait 5 s.
+        var table = try await request(Cmd.getModeTable, timeout: .seconds(5))
+        guard Cmd.isFullModeTable(table) else {
+            throw TransportError.unexpectedReply(command: Cmd.getModeTable)
+        }
         var index = 0
         while index + 1 < table.count {
             if table[index] == id { table[index + 1] = value }
@@ -441,30 +524,46 @@ public final class HeadphoneController: ObservableObject {
 
     @discardableResult
     func request(_ command: UInt16, payload: [UInt8] = [], timeout: Duration = .seconds(2)) async throws -> [UInt8] {
-        if let reason = CommandSafety.rejectionReason(for: command) {
+        if let reason = CommandSafety.rejectionReason(for: command, payload: payload) {
             throw TransportError.blockedCommand(reason: reason)
         }
-        if let stale = pending.removeValue(forKey: command) {
-            stale.continuation.resume(throwing: TransportError.timedOut(command: command))
-        }
 
+        let previous = lastRequest[command]
+        let turn = Task { () throws -> [UInt8] in
+            await previous?.value
+            return try await exchange(command, payload: payload, timeout: timeout)
+        }
+        lastRequest[command] = Task { _ = try? await turn.value }
+        return try await turn.value
+    }
+
+    /// Sends one frame and waits for its reply. Only `request` calls this, so
+    /// at most one exchange per command is ever in flight.
+    private func exchange(_ command: UInt16, payload: [UInt8], timeout: Duration) async throws -> [UInt8] {
+        // Overwriting a waiting request would leave its caller suspended forever.
+        assert(inFlight[command] == nil, "request() must finish one exchange before starting the next")
         nextSequence += 1
         let sequence = nextSequence
 
         return try await withCheckedThrowingContinuation { continuation in
-            pending[command] = (sequence, continuation)
+            inFlight[command] = (sequence, continuation)
             do {
                 try transport.send(GaiaFrame(command: command, payload: payload))
             } catch {
-                pending.removeValue(forKey: command)?.continuation.resume(throwing: error)
+                // A reply or a disconnect delivered during `send` may already
+                // have resumed this caller. Resuming twice traps.
+                if inFlight[command]?.sequence == sequence {
+                    inFlight[command] = nil
+                    continuation.resume(throwing: error)
+                }
                 return
             }
             Task { [weak self] in
                 try? await Task.sleep(for: timeout)
                 guard let self,
-                      let waiting = self.pending[command],
+                      let waiting = self.inFlight[command],
                       waiting.sequence == sequence else { return }   // not ours any more
-                self.pending.removeValue(forKey: command)
+                self.inFlight[command] = nil
                 waiting.continuation.resume(throwing: TransportError.timedOut(command: command))
             }
         }
@@ -489,14 +588,19 @@ public final class HeadphoneController: ObservableObject {
         switch kind {
         case .notification:
             applyNotification(frame)
-        case .success:
-            pending.removeValue(forKey: frame.baseCommand)?
-                .continuation.resume(returning: frame.payload)
-        case .error:
-            pending.removeValue(forKey: frame.baseCommand)?
-                .continuation.resume(throwing: TransportError.deviceRejected(
+        case .success, .error:
+            // With nothing waiting on this command, it is a late answer to a
+            // request that timed out, so it is dropped. A late reply while the
+            // next request for the same command waits cannot be told apart, and
+            // is taken as that request's answer.
+            guard let waiting = inFlight.removeValue(forKey: frame.baseCommand) else { return }
+            if kind == .success {
+                waiting.continuation.resume(returning: frame.payload)
+            } else {
+                waiting.continuation.resume(throwing: TransportError.deviceRejected(
                     command: frame.baseCommand,
                     code: frame.payload.first ?? 0))
+            }
         }
     }
 
@@ -519,7 +623,7 @@ public final class HeadphoneController: ObservableObject {
         case Cmd.getBandGain:
             // Pushed as the whole curve, one gain per band. Ignored mid-preset:
             // those are half-applied curves and showing them is the scatter.
-            if !isApplyingPreset, frame.payload.count == state.bands.count {
+            if presetsBeingApplied == 0, frame.payload.count == state.bands.count {
                 for (index, raw) in frame.payload.enumerated() {
                     state.bands[index].gainDb = Gain.decode(raw)
                 }
@@ -542,9 +646,11 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
+    /// Fails the requests in flight. Queued requests then try to send and fail
+    /// on the closed transport themselves.
     private func failAllPending(_ error: Error) {
-        let waiting = pending
-        pending.removeAll()
+        let waiting = inFlight
+        inFlight.removeAll()
         for (_, entry) in waiting { entry.continuation.resume(throwing: error) }
     }
 

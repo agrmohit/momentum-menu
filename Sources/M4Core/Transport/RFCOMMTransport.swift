@@ -12,6 +12,7 @@ public enum TransportError: LocalizedError {
     case timedOut(command: UInt16)
     case deviceRejected(command: UInt16, code: UInt8)
     case blockedCommand(reason: String)
+    case unexpectedReply(command: UInt16)
 
     public var errorDescription: String? {
         switch self {
@@ -31,6 +32,9 @@ public enum TransportError: LocalizedError {
             return String(format: "The headphones rejected command 0x%04X (code 0x%02X).", command, code)
         case .blockedCommand(let reason):
             return "Refused to send a known-dangerous command: \(reason)"
+        case .unexpectedReply(let command):
+            return String(format: "The headphones answered command 0x%04X in an unexpected form; nothing was changed.",
+                          command)
         }
     }
 }
@@ -335,7 +339,7 @@ final class RFCOMMTransport: NSObject {
     }
 
     func send(_ frame: GaiaFrame) throws {
-        if let reason = CommandSafety.rejectionReason(for: frame.command) {
+        if let reason = CommandSafety.rejectionReason(for: frame.command, payload: frame.payload) {
             throw TransportError.blockedCommand(reason: reason)
         }
         guard let channel, channel.isOpen() else { throw TransportError.notConnected }

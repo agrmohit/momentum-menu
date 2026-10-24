@@ -56,6 +56,13 @@ enum Cmd {
     static let modeComfort: UInt8 = 2
     static let modeAdaptive: UInt8 = 3
 
+    /// True for the only table shape seen from a MOMENTUM 4: `[1, x, 2, y, 3, z]`.
+    /// Every one of 43 community capture files agrees; anything else is
+    /// treated as a misread rather than written back.
+    static func isFullModeTable(_ table: [UInt8]) -> Bool {
+        table.count == 6 && table[0] == modeAntiWind && table[2] == modeComfort && table[4] == modeAdaptive
+    }
+
     // Equaliser ---------------------------------------------------------
     /// -> [] ; <- [bandCount, minGain i8, maxGain i8, ...]
     static let getEqConfig: UInt16 = 0x1000
@@ -77,6 +84,10 @@ enum Cmd {
     static let getFirmwareVersion: UInt16 = 0x1201
     /// -> [] ; <- [0/1]. INVERTED: 0 = enabled, 1 = disabled.
     static let getTouchControls: UInt16 = 0x1607
+    /// -> [] ; <- ASCII model id, NUL-terminated: "M4AEBT Black" on a
+    /// MOMENTUM 4 (community capture, FW 3.37.3).
+    static let getModelId: UInt16 = 0x1206
+    static let momentum4ModelPrefix = "M4AEBT"
 }
 
 /// Commands that must never be sent, and why.
@@ -109,6 +120,49 @@ enum CommandSafety {
         }
         if (0x0600...0x06FF).contains(command), !powerGroupAllowlist.contains(command) {
             return String(format: "0x%04X is in the 0x06xx power/system group, which resets the link", command)
+        }
+        return nil
+    }
+
+    /// The only frames the app may send: each command with the payloads it uses.
+    ///
+    /// An allow-list on top of the deny-list above, because community
+    /// catalogues name more dangerous ids than any deny-list keeps up with:
+    /// factory reset 0x0040, firmware upgrade 0x0200, pairing deletes 0x1405
+    /// and 0x1406, MMI reset 0x1604. Reads may carry one byte, which
+    /// `--diagnose` uses to tell "unsupported" from "wants an argument".
+    private static let allowed: [UInt16: ([UInt8]) -> Bool] = {
+        let read: ([UInt8]) -> Bool = { $0.count <= 1 }
+        let flag: ([UInt8]) -> Bool = { $0 == [0] || $0 == [1] }
+        let features: Set<UInt8> = [Cmd.Feature.battery, Cmd.Feature.userEq,
+                                    Cmd.Feature.transparency, Cmd.Feature.anc]
+        var rules: [UInt16: ([UInt8]) -> Bool] = [
+            Cmd.registerNotification: { $0.count == 1 && features.contains($0[0]) },
+            Cmd.setAncEnabled: flag,
+            Cmd.setNoiseLevel: { $0.count == 1 && $0[0] <= 100 },
+            // The app only ever writes the adaptive entry, or the whole table.
+            Cmd.setModeTable: { $0 == [Cmd.modeAdaptive, 0] || $0 == [Cmd.modeAdaptive, 1]
+                                || Cmd.isFullModeTable($0) },
+            // 16 bands is the most the controller accepts from the device.
+            Cmd.setBandGain: { $0.count == 2 && $0[0] < 16 },
+            Cmd.setBassBoost: flag,
+        ]
+        for id in [Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable,
+                   Cmd.getEqConfig, Cmd.getBandGain, Cmd.getAllGains, Cmd.getBandFrequency,
+                   Cmd.getBassBoost, Cmd.getFirmwareVersion, Cmd.getTouchControls, Cmd.getModelId] {
+            rules[id] = read
+        }
+        return rules
+    }()
+
+    static func rejectionReason(for command: UInt16, payload: [UInt8]) -> String? {
+        if let reason = rejectionReason(for: command) { return reason }
+        guard let rule = allowed[command] else {
+            return String(format: "0x%04X is not a command this app sends", command)
+        }
+        guard rule(payload) else {
+            let hex = payload.map { String(format: "%02X", $0) }.joined(separator: " ")
+            return String(format: "0x%04X does not take the payload [%@]", command, hex)
         }
         return nil
     }
