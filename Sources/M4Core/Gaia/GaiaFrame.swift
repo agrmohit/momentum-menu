@@ -2,13 +2,18 @@ import Foundation
 
 /// A single GAIA frame.
 ///
-/// Wire format, confirmed against two independent implementations and against
-/// captured traffic from a MOMENTUM 4 on firmware 3.38.3:
+/// Wire format (Qualcomm GAIA), checked against 763 captured MOMENTUM 4 and
+/// MOMENTUM 5 frames in the community M4C project:
 ///
-///     FF 03 | length(u16 BE) | vendor(u16 BE) | command(u16 BE) | payload
-///      ^  ^
-///      |  `- protocol version / flags, always 0x03 on this device
+///     FF | 03 | 00 | length(u8) | vendor(u16 BE) | command(u16 BE) | payload
+///      ^    ^    ^
+///      |    |    `- flags: bit 0 appends a checksum, bit 1 a 16-bit length.
+///      |    |       Always 0 from this device, and never set by this app.
+///      |    `- protocol version
 ///      `- start of frame
+///
+/// Payloads above 254 bytes need a different header, so they are never sent.
+/// The largest any capture shows is 25 bytes.
 ///
 /// Known-good vectors (see GaiaFrameTests):
 ///     get battery      -> FF 03 00 00 04 95 06 03
@@ -17,9 +22,11 @@ import Foundation
 ///     set ANC ack      <- FF 03 00 00 04 95 1B 04
 struct GaiaFrame: Equatable {
     static let start: UInt8 = 0xFF
-    static let flags: UInt8 = 0x03
+    static let version: UInt8 = 0x03
+    static let noFlags: UInt8 = 0x00
     static let vendorSennheiser: UInt16 = 0x0495
     static let headerLength = 8
+    static let maxPayload = 254
 
     var vendor: UInt16 = GaiaFrame.vendorSennheiser
     var command: UInt16
@@ -32,11 +39,14 @@ struct GaiaFrame: Equatable {
     }
 
     func encoded() -> [UInt8] {
+        // CommandSafety allows no payload anywhere near this; a longer one
+        // would go out with a truncated length and corrupt the stream.
+        assert(payload.count <= GaiaFrame.maxPayload, "GAIA payload too long for a one-byte length")
         var out = [UInt8]()
         out.reserveCapacity(GaiaFrame.headerLength + payload.count)
         out.append(GaiaFrame.start)
-        out.append(GaiaFrame.flags)
-        out.append(UInt8(truncatingIfNeeded: payload.count >> 8))
+        out.append(GaiaFrame.version)
+        out.append(GaiaFrame.noFlags)
         out.append(UInt8(truncatingIfNeeded: payload.count))
         out.append(UInt8(truncatingIfNeeded: vendor >> 8))
         out.append(UInt8(truncatingIfNeeded: vendor))
@@ -60,7 +70,14 @@ struct GaiaFrame: Equatable {
             if startIndex > 0 { buffer.removeFirst(startIndex) }
             guard buffer.count >= headerLength else { return nil }
 
-            let length = Int(buffer[2]) << 8 | Int(buffer[3])
+            // A stray 0xFF is not a frame start. Trusting its length field
+            // would park every later frame behind bytes that never come.
+            guard hasPlausibleHeader(buffer) else {
+                buffer.removeFirst()
+                continue
+            }
+
+            let length = Int(buffer[3])
             let total = headerLength + length
             guard buffer.count >= total else { return nil }
 
@@ -70,6 +87,14 @@ struct GaiaFrame: Equatable {
             buffer.removeFirst(total)
             return GaiaFrame(command: command, payload: payload, vendor: vendor)
         }
+    }
+
+    /// True when the header at the front of `bytes` has the fixed fields every
+    /// frame from this device carries. A frame with flags set would carry a
+    /// checksum or a longer length that this decoder does not read.
+    private static func hasPlausibleHeader(_ bytes: [UInt8]) -> Bool {
+        let vendor = UInt16(bytes[4]) << 8 | UInt16(bytes[5])
+        return bytes[1] == version && bytes[2] == noFlags && vendor == vendorSennheiser
     }
 }
 
