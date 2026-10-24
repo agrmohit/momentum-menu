@@ -12,7 +12,9 @@ CONFIG="${1:-release}"
 APP="build/MomentumMenu.app"
 
 echo "==> Building ($CONFIG)"
-XCRUN_NO_CACHE=1 swift build -c "$CONFIG" 2>&1 | grep -v "DVTFilePathFSEvents" || true
+# Only grep's status is ignored (it exits 1 when it filters every line). A
+# failed build must stop here, or a stale binary would be installed below.
+XCRUN_NO_CACHE=1 swift build -c "$CONFIG" 2>&1 | { grep -v "DVTFilePathFSEvents" || true; }
 
 BIN=".build/$CONFIG/MomentumMenu"
 [ -x "$BIN" ] || { echo "build failed: $BIN missing"; exit 1; }
@@ -59,7 +61,9 @@ echo "Built $APP"
 if [ "${2:-}" = "install" ]; then
     DEST="$HOME/Applications/MomentumMenu.app"
     echo "==> Installing to $DEST"
-    pkill -f "MomentumMenu" 2>/dev/null || true
+    # Exact process name: -f would also kill anything with the repo path in its
+    # command line, such as an editor.
+    pkill -x "MomentumMenu" 2>/dev/null || true
     mkdir -p "$HOME/Applications"
     rm -rf "$DEST"
     cp -R "$APP" "$DEST"
