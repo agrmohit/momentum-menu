@@ -5,6 +5,7 @@ struct MenuView: View {
     @ObservedObject var controller: HeadphoneController
     @State private var pendingLevel: Double = 50
     @State private var showAdvanced = false
+    @State private var showSettings = false
 
     /// What the sliders display, which is not always what the device holds.
     ///
@@ -45,7 +46,14 @@ struct MenuView: View {
                 Divider()
                 noiseControl
                 Divider()
-                equaliser
+                // Tighter than the sections around it, so the two disclosure
+                // rows read as one list.
+                VStack(alignment: .leading, spacing: 8) {
+                    equaliser
+                    if !state.settings.isEmpty {
+                        deviceSettings
+                    }
+                }
                 Divider()
                 footer
             } else {
@@ -367,6 +375,52 @@ struct MenuView: View {
 
     private func shownGain(_ band: EqBand) -> Double {
         shownGains.indices.contains(band.id) ? shownGains[band.id] : band.gainDb
+    }
+
+    // MARK: - Device settings
+
+    /// Collapsed like Advanced Audio Settings, for the same reasons.
+    private var deviceSettings: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { showSettings.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showSettings ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                    Text("Headphone Settings").font(.caption)
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(DeviceSetting.allCases, id: \.self) { setting in
+                    if let on = state.settings[setting] {
+                        let gated = setting.needsOnHead && state.settings[.onHeadDetection] == false
+                        Toggle(setting.label, isOn: Binding(
+                            get: { on },
+                            set: { value in Task { await controller.set(setting, on: value) } }
+                        ))
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .font(.caption)
+                        .disabled(gated)
+                        .help(gated ? "Needs on-head detection" : setting.explanation)
+                    }
+                }
+            }
+            .padding(.top, 6)
+            .frame(height: showSettings ? nil : 0, alignment: .top)
+            .opacity(showSettings ? 1 : 0)
+            .clipped()
+            .allowsHitTesting(showSettings)
+            .accessibilityHidden(!showSettings)
+        }
     }
 
     // MARK: - Footer

@@ -72,6 +72,14 @@ final class FakeHeadset {
     var rejectsFullTable = false
     /// Every mode-table write, as sent.
     private(set) var modeWrites: [[UInt8]] = []
+    /// Device settings by getter id, as the device stores them (touch is
+    /// inverted: 0 = enabled). A getter missing here answers with no payload.
+    var settings: [UInt16: UInt8] = [
+        Cmd.getTouchControls: 0, Cmd.getOnHead: 1, Cmd.getSmartPause: 1,
+        Cmd.getAutoAnswer: 0, Cmd.getComfortCall: 0,
+    ]
+    /// Setting ids, getter or setter, that the device rejects.
+    var rejects: Set<UInt16> = []
 
     var mode: NoiseMode { anc == 0 ? .off : (modeTable[5] == 1 ? .adaptive : .custom) }
     var curve: [Double] { bands.map(Gain.decode) }
@@ -79,6 +87,12 @@ final class FakeHeadset {
     /// Answers one frame. Mode-table reads with a delay arrive through `push`.
     func respond(_ frame: GaiaFrame, push: @escaping (GaiaFrame) -> Void) -> [GaiaFrame] {
         let value = frame.payload.first ?? 0
+        if rejects.contains(frame.command) { return [Reply.rejected(frame.command)] }
+        if let stored = settings[frame.command] { return [Reply.ok(frame.command, [stored])] }
+        if settings[frame.command + 1] != nil {
+            settings[frame.command + 1] = value
+            return [Reply.ok(frame.command)]
+        }
         switch frame.command {
         case Cmd.getAncEnabled: return [Reply.ok(frame.command, [anc])]
         case Cmd.setAncEnabled: anc = value

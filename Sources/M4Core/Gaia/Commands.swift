@@ -84,6 +84,24 @@ enum Cmd {
     static let getFirmwareVersion: UInt16 = 0x1201
     /// -> [] ; <- [0/1]. INVERTED: 0 = enabled, 1 = disabled.
     static let getTouchControls: UInt16 = 0x1607
+    /// -> [0/1], inverted like the getter.
+    static let setTouchControls: UInt16 = 0x1606
+
+    // Device settings ---------------------------------------------------
+    /// Getters take no payload and answer [0/1]; setters take [0/1]. Each
+    /// was confirmed by a write, a read-back and a restore on FW 3.38.3
+    /// (omarchy-momentum4 PROTOCOL.md). None sends a notification.
+    ///
+    /// On-head detection also gates Smart Pause and call hold.
+    static let getOnHead: UInt16 = 0x0401
+    static let setOnHead: UInt16 = 0x0400
+    static let getAutoAnswer: UInt16 = 0x080B
+    static let setAutoAnswer: UInt16 = 0x080A
+    /// Pauses playback when the headphones come off.
+    static let getSmartPause: UInt16 = 0x080D
+    static let setSmartPause: UInt16 = 0x080C
+    static let getComfortCall: UInt16 = 0x0815
+    static let setComfortCall: UInt16 = 0x0814
     /// -> [] ; <- ASCII model id, NUL-terminated: "M4AEBT Black" on a
     /// MOMENTUM 4 (community capture, FW 3.37.3).
     static let getModelId: UInt16 = 0x1206
@@ -146,7 +164,18 @@ enum CommandSafety {
             // 16 bands is the most the controller accepts from the device.
             Cmd.setBandGain: { $0.count == 2 && $0[0] < 16 },
             Cmd.setBassBoost: flag,
+            Cmd.setTouchControls: flag,
+            Cmd.setOnHead: flag,
+            Cmd.setAutoAnswer: flag,
+            Cmd.setSmartPause: flag,
+            Cmd.setComfortCall: flag,
         ]
+        // Strictly empty: this group sits beside ids that act on a device
+        // index, and "an id that answers an indexed payload with an empty OK
+        // is an action" (omarchy-momentum4 PROTOCOL.md).
+        for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall] {
+            rules[id] = { $0.isEmpty }
+        }
         for id in [Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable,
                    Cmd.getEqConfig, Cmd.getBandGain, Cmd.getAllGains, Cmd.getBandFrequency,
                    Cmd.getBassBoost, Cmd.getFirmwareVersion, Cmd.getTouchControls, Cmd.getModelId] {

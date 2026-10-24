@@ -197,7 +197,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
-            Task { await controller.connect() }
+            Task {
+                if controller.state.connected {
+                    // The headphones never announce a change to these, so the
+                    // phone may have changed them since the last poll.
+                    await controller.refreshSettings()
+                } else {
+                    await controller.connect()
+                }
+            }
         }
     }
 

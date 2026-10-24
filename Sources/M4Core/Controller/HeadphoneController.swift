@@ -36,6 +36,62 @@ public enum AntiWind: UInt8, Sendable {
     }
 }
 
+/// An on/off setting stored on the headphones. The device never announces a
+/// change to one, so it is read on refresh and when the popover opens.
+public enum DeviceSetting: CaseIterable, Sendable {
+    case touchControls
+    case onHeadDetection
+    case smartPause
+    case autoAnswer
+    case comfortCalls
+
+    var getter: UInt16 {
+        switch self {
+        case .touchControls: return Cmd.getTouchControls
+        case .onHeadDetection: return Cmd.getOnHead
+        case .smartPause: return Cmd.getSmartPause
+        case .autoAnswer: return Cmd.getAutoAnswer
+        case .comfortCalls: return Cmd.getComfortCall
+        }
+    }
+
+    var setter: UInt16 {
+        switch self {
+        case .touchControls: return Cmd.setTouchControls
+        case .onHeadDetection: return Cmd.setOnHead
+        case .smartPause: return Cmd.setSmartPause
+        case .autoAnswer: return Cmd.setAutoAnswer
+        case .comfortCalls: return Cmd.setComfortCall
+        }
+    }
+
+    /// Touch controls store 0 for enabled.
+    var isInverted: Bool { self == .touchControls }
+
+    /// Needs on-head detection to do anything.
+    public var needsOnHead: Bool { self == .smartPause || self == .autoAnswer }
+
+    public var label: String {
+        switch self {
+        case .touchControls: return "Touch controls"
+        case .onHeadDetection: return "On-head detection"
+        case .smartPause: return "Smart Pause"
+        case .autoAnswer: return "Auto-answer calls"
+        case .comfortCalls: return "Comfort Calls"
+        }
+    }
+
+    public var explanation: String {
+        switch self {
+        case .touchControls: return "The touch pad on the right ear cup"
+        case .onHeadDetection: return "Senses when the headphones are put on or taken off"
+        case .smartPause: return "Pauses playback when the headphones are taken off"
+        case .autoAnswer: return "Answers a call when the headphones are put on"
+        case .comfortCalls: return "A more natural sound during calls"
+        }
+    }
+}
+
 public struct EqBand: Identifiable, Sendable {
     public let id: Int
     public let frequencyHz: Int
@@ -102,6 +158,9 @@ public struct DeviceState: Sendable {
     /// 0 = full ANC ... 100 = full transparency
     public var noiseLevel: Int?
     public var bassBoost: Bool?
+    /// True means on (touch controls: enabled). Missing means unknown, or
+    /// not on this firmware.
+    public var settings: [DeviceSetting: Bool] = [:]
     public var bands: [EqBand] = []
     public var equaliserSupported = false
     /// Gain limits as the device reports them in 0x1000, not as we assume.
@@ -369,7 +428,20 @@ public final class HeadphoneController: ObservableObject {
         let bass = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
         if userChangesFinished == mark { state.bassBoost = bass }
 
+        await refreshSettings()
+
         state.lastError = nil
+    }
+
+    /// Reads the device settings, which the headphones never announce.
+    public func refreshSettings() async {
+        guard state.connected else { return }
+        for setting in DeviceSetting.allCases {
+            let mark = userChangesFinished
+            let raw = try? await request(setting.getter).first
+            guard userChangesFinished == mark else { continue }
+            state.settings[setting] = raw.map { setting.isInverted ? $0 == 0 : $0 != 0 }
+        }
     }
 
     private func refreshEqualiser() async {
@@ -521,6 +593,18 @@ public final class HeadphoneController: ObservableObject {
             }
         }
         state.lastError = nil
+    }
+
+    public func set(_ setting: DeviceSetting, on: Bool) async {
+        defer { userChangesFinished += 1 }
+        let raw: UInt8 = on != setting.isInverted ? 1 : 0
+        do {
+            _ = try await request(setting.setter, payload: [raw])
+            state.settings[setting] = on
+            state.lastError = nil
+        } catch {
+            state.lastError = error.localizedDescription
+        }
     }
 
     public func setBassBoost(_ enabled: Bool) async {
