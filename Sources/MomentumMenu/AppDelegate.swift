@@ -44,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.statusItem.isVisible = visible
         }
         statusItem.isVisible = !preferences.hideMenuBarIcon
+        preferences.onBatteryPercentageVisibilityChanged = { [weak self] in
+            guard let self else { return }
+            self.updateStatusItem(self.controller.state)
+        }
 
         // With the icon hidden there is nothing left to click, so opening the
         // app again has to lead somewhere useful: the window that can turn it
@@ -125,10 +129,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             stopPulse()
         }
 
-        // The battery bar carries the level, so no percentage text: it would
-        // say the same thing twice and double the item's width, which matters
-        // on a crowded menu bar. The exact figure is in the popover and the
-        // tooltip.
+        // The battery bar carries the level, so the percentage text is opt-in:
+        // it says the same thing twice and doubles the item's width, which
+        // matters on a crowded menu bar.
+        if preferences.showBatteryPercentage, state.connected, let percent = state.batteryPercent {
+            button.title = "\(percent)%"
+            button.imagePosition = .imageLeading
+        } else {
+            button.title = ""
+            button.imagePosition = .imageOnly
+        }
         button.image = StatusIcon.image(
             batteryPercent: state.batteryPercent,
             connected: state.connected,

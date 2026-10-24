@@ -43,7 +43,6 @@ struct MenuView: View {
             header
 
             if state.connected {
-                Divider()
                 noiseControl
                 Divider()
                 // Tighter than the sections around it, so the two disclosure
@@ -169,11 +168,12 @@ struct MenuView: View {
                     // No `step:`. NSSlider draws a tick per step, so stepping
                     // by 1 over 0...100 covers the track in a hundred of them.
                     // Rounding happens on the way to the device instead.
-                    Slider(value: $pendingLevel, in: 0...100) { editing in
+                    Slider(value: snapping($pendingLevel, to: 50, within: 3), in: 0...100) { editing in
                         if !editing {
                             Task { await controller.setNoiseLevel(Int(pendingLevel.rounded())) }
                         }
                     }
+                    .background { centreMark }
                     HStack {
                         Text("Noise cancelling").font(.caption2).foregroundStyle(.secondary)
                         Spacer()
@@ -238,7 +238,8 @@ struct MenuView: View {
                 Text("EQUALISER").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 if let bass = state.bassBoost {
-                    Toggle("Bass", isOn: Binding(
+                    // Smart Control's name for it.
+                    Toggle("Bass Boost", isOn: Binding(
                         get: { bass },
                         set: { on in Task { await controller.setBassBoost(on) } }
                     ))
@@ -300,31 +301,36 @@ struct MenuView: View {
                 // which reads as the whole box juddering up and down rather
                 // than a section opening. A plain button changes the layout
                 // exactly once, and the transaction makes sure of it.
-                Button {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { showAdvanced.toggle() }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
-                            .font(.caption2)
-                        Text("Advanced Audio Settings").font(.caption)
-                        Spacer()
+                // Spacing 0: the stack's spacing would stay around the
+                // collapsed sliders, so their gap goes inside the collapse.
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { showAdvanced.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
+                                .font(.caption2)
+                            Text("Advanced Audio Settings").font(.caption)
+                            Spacer()
+                        }
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                // Always built, merely collapsed. Creating five slider-backed
-                // views at click time is what made opening this feel slow;
-                // they are cheap to keep and instant to reveal.
-                bandSliders
-                    .frame(height: showAdvanced ? nil : 0, alignment: .top)
-                    .opacity(showAdvanced ? 1 : 0)
-                    .clipped()
-                    .allowsHitTesting(showAdvanced)
-                    .accessibilityHidden(!showAdvanced)
+                    // Always built, merely collapsed. Creating five slider-backed
+                    // views at click time is what made opening this feel slow;
+                    // they are cheap to keep and instant to reveal.
+                    bandSliders
+                        .padding(.top, 8)
+                        .frame(height: showAdvanced ? nil : 0, alignment: .top)
+                        .opacity(showAdvanced ? 1 : 0)
+                        .clipped()
+                        .allowsHitTesting(showAdvanced)
+                        .accessibilityHidden(!showAdvanced)
+                }
             }
         }
     }
@@ -339,7 +345,7 @@ struct MenuView: View {
                         .frame(width: 34, alignment: .trailing)
                         .foregroundStyle(.secondary)
                     Slider(
-                        value: Binding(
+                        value: snapping(Binding(
                             get: { shownGain(band) },
                             set: { value in
                                 // Track the drag locally; the device is told
@@ -350,7 +356,7 @@ struct MenuView: View {
                                     shownGains[band.id] = value
                                 }
                             }
-                        ),
+                        ), to: 0, within: 0.3),
                         in: state.eqMinGainDb...state.eqMaxGainDb,
                         onEditingChanged: { editing in
                             guard !editing else { return }
@@ -366,6 +372,9 @@ struct MenuView: View {
                     )
                     // Five stacked rows: the full-size knob dwarfs them.
                     .controlSize(.small)
+                    // 0 dB is the middle only because the device's range is
+                    // symmetric (-6 to +6 on 3.38.3).
+                    .background { if -state.eqMinGainDb == state.eqMaxGainDb { centreMark } }
                     Text(String(format: "%+.1f", shownGain(band)))
                         .font(.caption2.monospacedDigit())
                         .frame(width: 34, alignment: .leading)
@@ -373,6 +382,29 @@ struct MenuView: View {
                 }
             }
         }
+    }
+
+    /// A short tick behind a slider's track, at its middle.
+    private var centreMark: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.6))
+            .frame(width: 1, height: 10)
+    }
+
+    /// Pulls a dragged value onto `centre` when it comes within `within`,
+    /// with a tap on a Force Touch trackpad as it lands, as Spotlight's
+    /// sliders do.
+    private func snapping(_ value: Binding<Double>, to centre: Double, within: Double) -> Binding<Double> {
+        Binding(
+            get: { value.wrappedValue },
+            set: { new in
+                let snapped = abs(new - centre) < within ? centre : new
+                if snapped == centre, value.wrappedValue != centre {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
+                value.wrappedValue = snapped
+            }
+        )
     }
 
     /// Judged on the device's curve, not the sliders mid-animation.

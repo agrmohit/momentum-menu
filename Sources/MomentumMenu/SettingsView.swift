@@ -31,6 +31,8 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Toggle("Show battery percentage in the menu bar", isOn: $preferences.showBatteryPercentage)
+
             Toggle("Hide menu bar icon", isOn: $preferences.hideMenuBarIcon)
             if preferences.hideMenuBarIcon {
                 Text("The icon is how you reach this app. With it hidden, opening "
