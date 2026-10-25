@@ -289,6 +289,9 @@ public final class HeadphoneController: ObservableObject {
     /// writes it or shows it.
     private var equaliserEdits = 0
     private var bandOwner: [Int: Int] = [:]
+    /// Band writes sent and not yet answered. A gains read sent while any is
+    /// out may answer with the curve from before them.
+    private var bandWritesInFlight = 0
 
     public convenience init() {
         self.init(transport: RFCOMMTransport())
@@ -482,8 +485,16 @@ public final class HeadphoneController: ObservableObject {
         // The parametric equaliser is a firmware 3.x feature. On 2.x these ids
         // are rejected, which is a fact about the device rather than an error
         // worth showing the user as one.
-        guard let config = try? await request(Cmd.getEqConfig),
-              let gains = try? await request(Cmd.getAllGains, payload: [0]) else {
+        // The gains read is stale if a band write was still out when it was
+        // sent, or an edit started after. The screen already shows that edit.
+        let mark = equaliserEdits
+        guard let config = try? await request(Cmd.getEqConfig) else {
+            state.bands = []
+            state.equaliserSupported = false
+            return
+        }
+        let writesWereOut = bandWritesInFlight > 0
+        guard let gains = try? await request(Cmd.getAllGains, payload: [0]) else {
             state.bands = []
             state.equaliserSupported = false
             return
@@ -514,6 +525,9 @@ public final class HeadphoneController: ObservableObject {
             }
             let gain = index < gains.count ? Gain.decode(gains[index]) : 0
             bands.append(EqBand(id: index, frequencyHz: hz, gainDb: gain))
+        }
+        if writesWereOut || equaliserEdits != mark, state.bands.count == bands.count {
+            for index in bands.indices { bands[index].gainDb = state.bands[index].gainDb }
         }
         state.bands = bands
         state.equaliserSupported = true
@@ -572,7 +586,7 @@ public final class HeadphoneController: ObservableObject {
         let edit = equaliserEdits
         bandOwner[band] = edit
         do {
-            _ = try await request(Cmd.setBandGain, payload: [UInt8(band), Gain.encode(db: clamped)])
+            try await writeBand(band, db: clamped)
             // A preset clicked meanwhile has already shown its own value here.
             if bandOwner[band] == edit, let index = state.bands.firstIndex(where: { $0.id == band }) {
                 state.bands[index].gainDb = clamped
@@ -581,6 +595,12 @@ public final class HeadphoneController: ObservableObject {
         } catch {
             state.lastError = error.localizedDescription
         }
+    }
+
+    private func writeBand(_ band: Int, db: Double) async throws {
+        bandWritesInFlight += 1
+        defer { bandWritesInFlight -= 1 }
+        _ = try await request(Cmd.setBandGain, payload: [UInt8(band), Gain.encode(db: db)])
     }
 
     /// Applies a whole curve.
@@ -616,8 +636,7 @@ public final class HeadphoneController: ObservableObject {
             // would land after theirs and leave the device on an older choice.
             guard bandOwner[index] == edit else { continue }
             do {
-                _ = try await request(Cmd.setBandGain,
-                                      payload: [UInt8(index), Gain.encode(db: gain)])
+                try await writeBand(index, db: gain)
             } catch {
                 // The curve on screen is now a promise we failed to keep, so
                 // take the device's word for it instead.
