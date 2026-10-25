@@ -84,10 +84,12 @@ final class RequestMatchingTests: XCTestCase {
             expected: [.reply([1]), .reply([2])]),
         // Deliberately unsupported: with no request id on the wire, a reply that
         // arrives after its own timeout answers the next same-command caller.
+        // Caller 2 waits from about 100 ms; reply 1 lands at 700 ms and reply 2
+        // near 1300 ms. A 50 ms gap here flaked on a loaded CI runner.
         Row(name: "known limit: a late reply answers the next same-command caller",
             calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(100)),
-                    Call(command: Cmd.getBandFrequency, tag: 2, timeout: .seconds(1))],
-            lateTags: [1: .milliseconds(150), 2: .milliseconds(400)],
+                    Call(command: Cmd.getBandFrequency, tag: 2, timeout: .seconds(2))],
+            lateTags: [1: .milliseconds(700), 2: .milliseconds(1200)],
             expected: [.timedOut, .reply([1])]),
     ]
 
