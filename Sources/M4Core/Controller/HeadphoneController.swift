@@ -104,11 +104,17 @@ public struct EqBand: Identifiable, Sendable {
     public let frequencyHz: Int
     public var gainDb: Double
 
+    /// Smart Control's label for the first five bands, the real centre after.
+    /// The device's own centres read 90, 325, 1500, 6500 and 6500 Hz, so two
+    /// sliders would share a label.
     public var label: String {
-        frequencyHz >= 1000
+        if id < Self.smartControlLabels.count { return Self.smartControlLabels[id] }
+        return frequencyHz >= 1000
             ? String(format: "%.1fk", Double(frequencyHz) / 1000).replacingOccurrences(of: ".0k", with: "k")
             : "\(frequencyHz)"
     }
+
+    private static let smartControlLabels = ["63", "250", "1k", "4k", "8k"]
 }
 
 public struct EqPreset: Identifiable, Sendable {
@@ -939,7 +945,7 @@ public final class HeadphoneController: ObservableObject {
                                          ? "not on this firmware (added in 3.x)"
                                          : "not available"))
         } else {
-            let curve = state.bands.map { "\($0.label)Hz \(String(format: "%+.1f", $0.gainDb))dB" }
+            let curve = state.bands.map { "\($0.frequencyHz)Hz \(String(format: "%+.1f", $0.gainDb))dB" }
             lines.append("EQ:       " + curve.joined(separator: "  "))
         }
         if let touch = try? await request(Cmd.getTouchControls).first {
