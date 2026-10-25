@@ -55,13 +55,10 @@ struct PairedDevicesList: View {
                 .help(canDisconnect ? "Disconnect" : "This firmware can't disconnect it from here")
             } else {
                 let canConnect = !state.connectionSlotsFull && state.pairedAction == nil
-                Button {
+                Button("Connect") {
                     Task { await controller.connect(to: device) }
-                } label: {
-                    Text("Connect")
-                        .pill(canConnect ? .blue : .secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PillStyle(colour: canConnect ? .blue : .secondary))
                 .disabled(!canConnect)
                 .accessibilityLabel("Connect \(name)")
             }
@@ -88,26 +85,42 @@ private struct StatusPill: View {
                 Text(label).opacity(armed ? 0 : 1)
                 Text("Disconnect").opacity(armed ? 1 : 0)
             }
-            .pill(armed ? .red : .green)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PillStyle(colour: armed ? .red : .green))
         .disabled(!canDisconnect)
         .onHover { hovering = $0 }
         .accessibilityLabel(canDisconnect ? "Disconnect \(device)" : "\(device), \(label)")
     }
 }
 
-private extension View {
-    /// Coloured text on a faint capsule of the same colour, as the charging
-    /// pill is drawn. Not a bordered button: those go grey whenever the
-    /// window is not key.
-    func pill(_ colour: Color) -> some View {
-        font(.caption.weight(.semibold))
-            .foregroundStyle(colour)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(colour.opacity(0.18), in: .capsule)
-            .contentShape(.capsule)
+/// Coloured text on a capsule of the same colour, as the charging pill is
+/// drawn. Its own style rather than `.plain` or `.bordered`, which both
+/// dimmed the label in the popover.
+private struct PillStyle: ButtonStyle {
+    let colour: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        Pill(label: configuration.label, colour: colour, pressed: configuration.isPressed)
+    }
+
+    /// A view, so it can read whether the button is enabled: a ButtonStyle
+    /// cannot. Disabled pills fade.
+    private struct Pill: View {
+        let label: Configuration.Label
+        let colour: Color
+        let pressed: Bool
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            label
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(colour)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(colour.opacity(pressed ? 0.4 : 0.25), in: .capsule)
+                .contentShape(.capsule)
+                .opacity(isEnabled ? 1 : 0.45)
+        }
     }
 }
 

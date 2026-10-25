@@ -79,6 +79,7 @@ struct SettingsView: View {
                             Badge(preferences.displayKind(name, among: devices).symbol, .blue)
                         }
                     }
+                    .disabled(preferences.demoDeviceNames)
                 }
             } header: {
                 Text("Paired Devices")
@@ -109,10 +110,12 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Automatic (nil) removes the stored choice.
+    /// Automatic (nil) removes the stored choice. With demo names on it
+    /// reads Automatic and writes nothing: a stored choice would hint at
+    /// the real device behind the stock name.
     private func kindBinding(for name: String) -> Binding<DeviceKind?> {
-        Binding(get: { preferences.deviceKinds[name] },
-                set: { preferences.deviceKinds[name] = $0 })
+        Binding(get: { preferences.demoDeviceNames ? nil : preferences.deviceKinds[name] },
+                set: { if !preferences.demoDeviceNames { preferences.deviceKinds[name] = $0 } })
     }
 }
 
