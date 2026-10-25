@@ -42,7 +42,7 @@ cd momentum-menu && ./build.sh release install
 open -a MomentumMenu
 ```
 
-That needs macOS 14+ and Xcode's Swift toolchain, and installs to
+That needs macOS 26+ and Xcode's Swift toolchain, and installs to
 `~/Applications`. macOS asks for Bluetooth permission on first launch.
 
 > [!NOTE]
@@ -65,7 +65,7 @@ Verified against a MOMENTUM 4 Wireless on this Mac:
 | Equaliser (5-band, presets) | works — **needs headphone firmware 3.x** |
 | Bass boost | works — **needs headphone firmware 3.x** |
 | Disconnect (frees a multipoint slot) | works |
-| Settings: launch at login, hide icon, update checks | works |
+| Settings: launch at login, battery percentage, hide icon | works |
 
 Verified against a MOMENTUM 4 Wireless on firmware 3.38.3, and previously on
 2.13.42.
@@ -115,7 +115,7 @@ update the headphones.
 ## Using it
 
 Left click the menu bar icon for battery, noise control and the equaliser.
-Right click for Settings, update checks and Exit App.
+Right click for Settings, Refresh, Disconnect and Quit.
 
 The icon is a headphones glyph over a battery bar — deliberately not a bare
 headphones glyph, which is what macOS already shows in its own Sound item
@@ -163,8 +163,8 @@ for by other people's hardware.
 
 ## Requirements
 
-- Apple Silicon or Intel Mac on macOS 14 or later
-- Xcode 15+ (for the Swift toolchain)
+- Apple Silicon or Intel Mac on macOS 26 or later
+- Xcode 26+ (for the Swift toolchain)
 - MOMENTUM 4 paired to the Mac
 
 ## Build

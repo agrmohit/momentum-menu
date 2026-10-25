@@ -1,116 +1,73 @@
-import AppKit
 import SwiftUI
 
+/// The Settings window, laid out as a System Settings pane: a grouped form
+/// whose rows carry a coloured symbol badge.
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
-    @ObservedObject var updates: UpdateChecker
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            general
-            Divider()
-            updatesSection
-            Divider()
-            about
-        }
-        .padding(20)
-        .frame(width: 400)
-    }
-
-    // MARK: - General
-
-    private var general: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("GENERAL").font(.caption2).foregroundStyle(.secondary)
-
-            Toggle("Launch at login", isOn: $preferences.launchAtLogin)
-            if let error = preferences.launchAtLoginError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Toggle("Show battery percentage in the menu bar", isOn: $preferences.showBatteryPercentage)
-
-            Toggle("Hide menu bar icon", isOn: $preferences.hideMenuBarIcon)
-            if preferences.hideMenuBarIcon {
-                Text("The icon is how you reach this app. With it hidden, opening "
-                     + "Momentum Menu again brings you straight back to this window.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    // MARK: - Updates
-
-    private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("UPDATES").font(.caption2).foregroundStyle(.secondary)
-
-            Toggle("Check for updates automatically", isOn: $preferences.automaticUpdateChecks)
-            Text("Checks GitHub once a day for a newer published release.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                Button("Check Now") { Task { await updates.check() } }
-                    .controlSize(.small)
-                    .disabled(updates.status == .checking)
-
-                if case .updateAvailable = updates.status {
-                    Button("Open Releases") {
-                        if let url = URL(string: "https://github.com/\(UpdateChecker.repository)/releases") {
-                            NSWorkspace.shared.open(url)
+        Form {
+            Section("General") {
+                Toggle(isOn: $preferences.launchAtLogin) {
+                    Label { Text("Launch at Login") } icon: { Badge("power", .gray) }
+                }
+                if let error = preferences.launchAtLoginError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                Toggle(isOn: $preferences.showBatteryPercentage) {
+                    Label { Text("Battery Percentage in Menu Bar") } icon: { Badge("battery.75percent", .green) }
+                }
+                Toggle(isOn: $preferences.hideMenuBarIcon) {
+                    Label {
+                        Text("Hide Menu Bar Icon")
+                        // The icon is the only way in; reopening the app leads here.
+                        if preferences.hideMenuBarIcon {
+                            Text("Open MomentumMenu again to come back here.")
                         }
-                    }
-                    .controlSize(.small)
+                    } icon: { Badge("menubar.rectangle", .blue) }
                 }
             }
 
-            Text(updates.status.message)
-                .font(.caption2)
-                .foregroundStyle(isProblem ? .orange : .secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let checked = updates.lastChecked {
-                Text("Last checked \(checked.formatted(date: .abbreviated, time: .shortened)).")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private var isProblem: Bool {
-        if case .unavailable = updates.status { return true }
-        return false
-    }
-
-    // MARK: - About
-
-    private var about: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ABOUT").font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Text("Momentum Menu").font(.callout.weight(.medium))
-                Spacer()
-                Text("Version \(Preferences.displayVersion)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-            Text("Unofficial. Not affiliated with Sennheiser or Sonova.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            Button("View on GitHub") {
-                if let url = URL(string: "https://github.com/\(UpdateChecker.repository)") {
-                    NSWorkspace.shared.open(url)
+            Section("About") {
+                LabeledContent {
+                    Text("Version \(Preferences.displayVersion)")
+                        .textSelection(.enabled)
+                } label: {
+                    Label {
+                        Text("MomentumMenu")
+                        Text("Unofficial. Not affiliated with Sennheiser or Sonova.")
+                    } icon: { Badge("headphones.over.ear", .indigo) }
+                }
+                Link(destination: Preferences.repository) {
+                    Label { Text("github.com/agrmohit/momentum-menu") } icon: { Badge("link", .gray) }
                 }
             }
-            .buttonStyle(.link)
-            .font(.caption)
         }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A white SF Symbol on a coloured rounded square, as System Settings marks
+/// its rows.
+private struct Badge: View {
+    let symbol: String
+    let colour: Color
+
+    init(_ symbol: String, _ colour: Color) {
+        self.symbol = symbol
+        self.colour = colour
+    }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(colour.gradient, in: .rect(cornerRadius: 5))
     }
 }

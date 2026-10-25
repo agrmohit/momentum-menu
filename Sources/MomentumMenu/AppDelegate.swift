@@ -22,11 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover!
     private let controller = HeadphoneController()
     private let preferences = Preferences.shared
-    private let updateChecker = UpdateChecker()
     private var settingsWindow: NSWindow?
     private var cancellables = Set<AnyCancellable>()
     private var pollTimer: Timer?
-    private var updateTimer: Timer?
     private var connectingTimer: Timer?
     private var connectingPhase: Double = 0
 
@@ -92,16 +90,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 }
             }
         }
-
-        if preferences.automaticUpdateChecks {
-            Task { await updateChecker.check() }
-            updateTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self, self.preferences.automaticUpdateChecks else { return }
-                    await self.updateChecker.check()
-                }
-            }
-        }
     }
 
     /// Reopening a menu bar app has no window to restore, so send the user to
@@ -113,7 +101,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         pollTimer?.invalidate()
-        updateTimer?.invalidate()
         connectingTimer?.invalidate()
         controller.disconnect()
     }
@@ -223,21 +210,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover.isShown { popover.performClose(nil) }
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Settings…", action: #selector(openSettingsItem), keyEquivalent: ",")
-        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdatesItem), keyEquivalent: "")
+        menu.addItem(item("Settings…", symbol: "gearshape", action: #selector(openSettingsItem), key: ","))
 
         menu.addItem(.separator())
-        let disconnect = menu.addItem(withTitle: "Disconnect",
-                                      action: #selector(disconnectItem), keyEquivalent: "")
+        let refresh = item("Refresh", symbol: "arrow.clockwise", action: #selector(refreshItem))
+        refresh.isEnabled = controller.state.connected
+        menu.addItem(refresh)
+        let disconnect = item("Disconnect", symbol: "power", action: #selector(disconnectItem))
         disconnect.isEnabled = controller.state.connected
         disconnect.toolTip = "Free one of the headphones' two connection slots for another device."
+        menu.addItem(disconnect)
 
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Exit App", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = item("Quit MomentumMenu", symbol: "xmark.circle",
+                        action: #selector(NSApplication.terminate(_:)), key: "q")
+        quit.target = NSApp
+        menu.addItem(quit)
 
-        for item in menu.items where item.action != #selector(NSApplication.terminate(_:)) {
-            item.target = self
-        }
+        // Key equivalents go to the active app. A menu bar app is not active
+        // until something of its own is focused, so without this ⌘Q in this
+        // menu reached whichever app was in front.
+        NSApp.activate()
 
         // Attaching the menu and clicking the button is what positions it under
         // the status item; it is detached again so the next left click still
@@ -247,14 +240,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.menu = nil
     }
 
+    private func item(_ title: String, symbol: String, action: Selector, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        item.target = self
+        return item
+    }
+
     @objc private func openSettingsItem() { openSettings() }
 
-    @objc private func disconnectItem() { controller.releaseHeadphones() }
+    @objc private func refreshItem() { Task { await controller.refresh() } }
 
-    @objc private func checkForUpdatesItem() {
-        openSettings()
-        Task { await updateChecker.check() }
-    }
+    @objc private func disconnectItem() { controller.releaseHeadphones() }
 
     private func openSettings() {
         if settingsWindow == nil {
@@ -264,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                                   defer: false)
             window.title = "Momentum Menu Settings"
             window.contentViewController = NSHostingController(
-                rootView: SettingsView(preferences: preferences, updates: updateChecker))
+                rootView: SettingsView(preferences: preferences))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window

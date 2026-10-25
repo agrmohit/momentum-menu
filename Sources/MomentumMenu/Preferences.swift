@@ -8,7 +8,6 @@ final class Preferences: ObservableObject {
 
     private enum Key {
         static let hideMenuBarIcon = "hideMenuBarIcon"
-        static let automaticUpdateChecks = "automaticUpdateChecks"
         static let showBatteryPercentage = "showBatteryPercentage"
     }
 
@@ -34,10 +33,6 @@ final class Preferences: ObservableObject {
         }
     }
 
-    @Published var automaticUpdateChecks: Bool {
-        didSet { defaults.set(automaticUpdateChecks, forKey: Key.automaticUpdateChecks) }
-    }
-
     /// Off by default: the battery bar already shows the level.
     @Published var showBatteryPercentage: Bool {
         didSet {
@@ -52,7 +47,6 @@ final class Preferences: ObservableObject {
         // rather than trusting what we last wrote.
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hideMenuBarIcon = defaults.bool(forKey: Key.hideMenuBarIcon)
-        automaticUpdateChecks = defaults.bool(forKey: Key.automaticUpdateChecks)
         showBatteryPercentage = defaults.bool(forKey: Key.showBatteryPercentage)
     }
 
@@ -76,6 +70,9 @@ final class Preferences: ObservableObject {
             isApplyingLoginItem = false
         }
     }
+
+    /// This fork; upstream is andr3-santos/momentum-menu.
+    static let repository = URL(string: "https://github.com/agrmohit/momentum-menu")!
 
     static var shortVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"

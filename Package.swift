@@ -3,7 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "MomentumMenu",
-    platforms: [.macOS(.v14)],
+    // String form: tools 5.9 has no .v26 case, and tools 6 would switch the
+    // language mode to Swift 6.
+    platforms: [.macOS("26.0")],
     targets: [
         // Protocol, transport and device state. No UI, so it can be unit tested.
         .target(name: "M4Core", path: "Sources/M4Core"),

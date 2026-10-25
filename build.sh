@@ -38,7 +38,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key>       <string>1.0.2</string>
     <key>CFBundleExecutable</key>               <string>MomentumMenu</string>
     <key>CFBundlePackageType</key>              <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>           <string>14.0</string>
+    <key>LSMinimumSystemVersion</key>           <string>26.0</string>
 
     <!-- Menu bar only: no Dock icon, no main window. -->
     <key>LSUIElement</key>                      <true/>
