@@ -1,0 +1,30 @@
+# Builds the app and tests from scratch with warnings as errors, then runs the
+# tests (`make check`). Also called by release.yml, so no release skips it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-26
+    # A newer push makes an older check moot. Job-level, so a release calling
+    # this workflow is never cancelled by a push to main.
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      # The image's default today, named so an image update cannot change
+      # the toolchain silently; the job fails if it is ever removed.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check
+        run: make check

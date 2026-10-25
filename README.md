@@ -43,8 +43,9 @@ The app is ad hoc signed, not notarised, so macOS blocks its first launch whatev
 Needs macOS 26 and Xcode 26 (the Command Line Tools lack the SwiftUI macro plugin and XCTest).
 
 ```sh
-./build.sh release install    # builds, signs ad hoc, installs to ~/Applications
-open -a MomentumMenu
+make install    # builds, signs ad hoc, installs to ~/Applications
+make check      # clean build with warnings as errors, then the tests; what CI runs
+make            # every target and variable
 ```
 
 - The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
@@ -52,7 +53,8 @@ open -a MomentumMenu
 - The line under the battery opens the paired devices, to connect or disconnect one. Settings sets each device's icon.
 - For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
 - Settings > App Icon picks Starfield (bundled), Sleepy or Ghost, and the app sets the choice again at launch. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
-- `swift test` runs the suite without hardware.
+- The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
+- A release is a `v*` tag on a commit whose `build.sh` version matches and which has `docs/releases/<tag>.md`. CI runs first, then the release workflow builds, attests and publishes the DMG.
 
 ## Protocol notes
 
