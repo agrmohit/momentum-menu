@@ -155,6 +155,31 @@ public struct EqPreset: Identifiable, Sendable {
     }
 }
 
+/// One entry in the headphones' list of paired devices.
+public struct PairedDevice: Identifiable, Equatable, Sendable {
+    /// Position in the headphones' list. Not stable: the list can reorder
+    /// when a device reconnects.
+    public let index: Int
+    public let name: String
+    public let isConnected: Bool
+    /// The device this app talks through.
+    public let isThisMac: Bool
+
+    public var id: Int { index }
+}
+
+/// A change to one paired device, by the name the user clicked.
+public enum PairedAction: Equatable, Sendable {
+    case connecting(String)
+    case disconnecting(String)
+
+    public var deviceName: String {
+        switch self {
+        case .connecting(let name), .disconnecting(let name): return name
+        }
+    }
+}
+
 public struct DeviceState: Sendable {
     public var connected = false
     /// A connection attempt is in flight. Distinct from `connected == false`,
@@ -189,10 +214,18 @@ public struct DeviceState: Sendable {
     /// Major version, so features can be gated on it. The parametric equaliser
     /// and bass boost exist only from firmware 3.x.
     public var firmwareMajor: Int?
+    /// [major, minor, patch], e.g. [3, 38, 3].
+    public var firmwareVersion: [Int]?
     /// Set when the user asked to hand the headphones over to another device.
     /// Stops the app's background poll from quietly grabbing them back.
     public var releasedByUser = false
     public var lastError: String?
+    /// Nil until read, or when the last read failed.
+    public var pairedDevices: [PairedDevice]?
+    /// How many devices can be connected at once; 2 on a MOMENTUM 4.
+    public var maxConnections: Int?
+    /// The connect or disconnect under way, if any. One at a time.
+    public var pairedAction: PairedAction?
 
     /// Plugged in and full. Worth distinguishing: "Charging" at 100% reads as
     /// something still being done.
@@ -224,6 +257,35 @@ public struct DeviceState: Sendable {
         guard codecName != nil, let rate = sampleRateHz, rate > 0 else { return nil }
         return String(format: "%g kHz", Double(rate) / 1000)
     }
+
+    /// "Also on iPhone", "Only this Mac" or "Connecting iPad"; nil while the
+    /// list is unknown.
+    public var pairedSummary: String? {
+        switch pairedAction {
+        case .connecting(let name): return "Connecting \(name)"
+        case .disconnecting(let name): return "Disconnecting \(name)"
+        case nil: break
+        }
+        guard let devices = pairedDevices else { return nil }
+        let others = devices.filter { $0.isConnected && !$0.isThisMac }.map(\.name)
+        return others.isEmpty ? "Only this Mac" : "Also on \(others.joined(separator: ", "))"
+    }
+
+    /// Every slot is in use, so connecting another device would need one
+    /// disconnected first, which the app cannot do. False while unknown.
+    public var connectionSlotsFull: Bool {
+        guard let devices = pairedDevices, let max = maxConnections else { return false }
+        return devices.filter(\.isConnected).count >= max
+    }
+
+    /// 0x1403 only disconnects from FW 3.38.3 (momentum4-control captures);
+    /// on 2.13.42 it erased a pairing, and nothing between was tested.
+    public var canDisconnectOthers: Bool {
+        guard let version = firmwareVersion else { return false }
+        return !version.lexicographicallyPrecedes(Self.firstSafeDisconnectFirmware)
+    }
+
+    static let firstSafeDisconnectFirmware = [3, 38, 3]
 
     /// True when the device is running firmware old enough to lack the
     /// equaliser entirely.
@@ -313,6 +375,13 @@ public final class HeadphoneController: ObservableObject {
     /// Band writes sent and not yet answered. A gains read sent while any is
     /// out may answer with the curve from before them.
     private var bandWritesInFlight = 0
+    /// Paired-device list reads started so far. Only the newest is shown: an
+    /// older one can finish later when the list shrank meanwhile.
+    private var pairedListReads = 0
+    /// How often a connect asks whether the device is up, and for how long.
+    /// Captures show it up 2.9 s after the connect.
+    var peerPollInterval: Duration = .milliseconds(300)
+    var peerConnectTimeout: Duration = .seconds(8)
 
     public convenience init() {
         self.init(transport: RFCOMMTransport())
@@ -385,6 +454,10 @@ public final class HeadphoneController: ObservableObject {
             state.connected = true
             await registerForNotifications()
             await refresh()
+            // Connected and shown by now; the list is extra and need not
+            // keep the menu-bar icon pulsing.
+            state.isConnecting = false
+            await refreshPairedDevices()
         } catch {
             guard link == links else { return abandon() }
             state.connected = false
@@ -420,6 +493,8 @@ public final class HeadphoneController: ObservableObject {
         state.isCharging = nil
         state.codec = nil
         state.sampleRateHz = nil
+        state.pairedDevices = nil
+        state.maxConnections = nil
         // The phone may change the mode while this Mac is away.
         knownAdaptive = nil
     }
@@ -457,15 +532,15 @@ public final class HeadphoneController: ObservableObject {
     /// The device sends nothing to a client that has not asked. That is why
     /// charging appeared undetectable: it is announced, but only to
     /// subscribers, and we were not one. Battery (3) carries the charging
-    /// push, audio (4) the codec and sample rate; the rest keep the menu
-    /// honest when the phone app or the headset's own controls change
-    /// something.
+    /// push, audio (4) the codec and sample rate, device management (10)
+    /// paired devices connecting; the rest keep the menu honest when the
+    /// phone app or the headset's own controls change something.
     ///
     /// Failures are ignored: an unsupported feature is not a reason to refuse
     /// to connect.
     private func registerForNotifications() async {
         for feature in [Cmd.Feature.battery, Cmd.Feature.audio, Cmd.Feature.anc,
-                        Cmd.Feature.userEq, Cmd.Feature.transparency] {
+                        Cmd.Feature.userEq, Cmd.Feature.transparency, Cmd.Feature.deviceManagement] {
             _ = try? await request(Cmd.registerNotification,
                                    payload: [feature],
                                    timeout: .seconds(1))
@@ -503,6 +578,7 @@ public final class HeadphoneController: ObservableObject {
             let parts = stride(from: 0, to: 6, by: 2).map { Int(version[$0]) << 8 | Int(version[$0 + 1]) }
             state.firmware = parts.map(String.init).joined(separator: ".")
             state.firmwareMajor = parts.first
+            state.firmwareVersion = parts
         }
 
         await refreshEqualiser()
@@ -794,12 +870,180 @@ public final class HeadphoneController: ObservableObject {
         return nil
     }
 
+    // MARK: - Paired devices
+
+    /// Reads the headphones' paired devices into the state. Not part of
+    /// `refresh()`: the list is read on connect, on request, and on a push.
+    public func refreshPairedDevices() async {
+        guard state.connected else { return }
+        _ = await loadPairedDevices()
+    }
+
+    /// Reads the list and shows it unless a newer read started meanwhile or
+    /// the link changed. Returns what was read either way; nil on a failure.
+    private func loadPairedDevices() async -> (devices: [PairedDevice], max: Int?)? {
+        pairedListReads += 1
+        let read = pairedListReads
+        let link = links
+        let list = await readPairedDevices()
+        if read == pairedListReads, link == links {
+            state.pairedDevices = list?.devices
+            state.maxConnections = list?.max
+        }
+        return list
+    }
+
+    /// Count, own index and limit, then one entry per index. Any entry that
+    /// fails fails the whole list: a list with a gap would shift names.
+    private func readPairedDevices() async -> (devices: [PairedDevice], max: Int?)? {
+        guard let countReply = try? await request(Cmd.getPairedDeviceCount), countReply.count == 2 else {
+            return nil
+        }
+        let count = min(Int(countReply[0]) << 8 | Int(countReply[1]), Cmd.maxPairedDevices)
+        let own = Self.singleByte(try? await request(Cmd.getOwnDeviceIndex))
+        let max = Self.singleByte(try? await request(Cmd.getMaxConnections))
+
+        var entries: [(name: String, connected: Bool)] = []
+        for index in 0..<count {
+            guard let reply = try? await request(Cmd.getPairedDevice, payload: [UInt8(index)]),
+                  let entry = Self.pairedEntry(reply, index: index) else { return nil }
+            entries.append(entry)
+        }
+        // Trusted only on a connected slot, since this Mac is connected.
+        // omarchy-momentum4 reads 0x1407 as a restart flag; a wrong guess
+        // here must not label a phone as this Mac.
+        let thisMac = own.flatMap { $0 < entries.count && entries[$0].connected ? $0 : nil }
+        let devices = entries.enumerated().map {
+            PairedDevice(index: $0.offset, name: $0.element.name,
+                         isConnected: $0.element.connected, isThisMac: $0.offset == thisMac)
+        }
+        return (devices, max)
+    }
+
+    /// The one byte 0x1407 and 0x1409 answer; nil for any other length.
+    private static func singleByte(_ reply: [UInt8]?) -> Int? {
+        guard let reply, reply.count == 1 else { return nil }
+        return Int(reply[0])
+    }
+
+    /// `[index, priority, connected, name..., 00]`; nil unless the index
+    /// echoes. An empty OK is how an action answers, so it is no entry.
+    static func pairedEntry(_ reply: [UInt8], index: Int) -> (name: String, connected: Bool)? {
+        guard reply.count >= 3, Int(reply[0]) == index else { return nil }
+        let name = String(decoding: reply.dropFirst(3).prefix { $0 != 0 }, as: UTF8.self)
+        return (name, reply[2] != 0)
+    }
+
+    /// Connects a paired device alongside this Mac.
+    ///
+    /// Refused when every slot is taken; see `change(_:connect:)` for the
+    /// checks both directions share.
+    public func connect(to device: PairedDevice) async {
+        await change(device, connect: true)
+    }
+
+    /// Disconnects a paired device. For this Mac that is a hand-over, as
+    /// the power button does; others take 0x1403, on FW 3.38.3 and newer
+    /// only: 2.13.42 erased a pairing with it. `request` enforces that, and
+    /// the menu offers no Disconnect below it.
+    public func disconnect(_ device: PairedDevice) async {
+        if device.isThisMac {
+            guard state.pairedAction == nil else { return }
+            releaseHeadphones()
+            return
+        }
+        await change(device, connect: false)
+    }
+
+    /// Connects or disconnects one paired device by index.
+    ///
+    /// Refuses before sending when the list moved since the user saw it
+    /// (indexes can reorder on reconnect), when the name is ambiguous, or
+    /// when this Mac cannot be identified: its own slot must never be the
+    /// target. The device acknowledges before the link changes, so the
+    /// status is polled until the deadline, and a fresh list decides.
+    private func change(_ device: PairedDevice, connect: Bool) async {
+        guard state.connected, state.pairedAction == nil else { return }
+        state.pairedAction = connect ? .connecting(device.name) : .disconnecting(device.name)
+        defer { state.pairedAction = nil }
+        state.lastError = nil
+        let link = links
+
+        guard let before = await loadPairedDevices() else {
+            guard link == links else { return }
+            state.lastError = "Couldn't read the headphones' paired devices."
+            return
+        }
+        guard let target = before.devices.first(where: { $0.index == device.index }),
+              target.name == device.name else {
+            state.lastError = "The paired devices changed. Check the list and try again."
+            return
+        }
+        if target.isThisMac || target.isConnected == connect { return }
+        // Index and name are all the device reports. Two entries with one
+        // name could swap places unseen, and the outcome is judged by name.
+        guard before.devices.filter({ $0.name == device.name }).count == 1 else {
+            state.lastError = "Two paired devices are called \(device.name), so the app can't tell them apart."
+            return
+        }
+        guard before.devices.contains(where: \.isThisMac) else {
+            state.lastError = "Couldn't tell which paired device is this Mac, so nothing was changed."
+            return
+        }
+        if connect {
+            let connectedCount = before.devices.filter(\.isConnected).count
+            guard let max = before.max else {
+                state.lastError = "Couldn't tell how many devices the headphones can connect at once."
+                return
+            }
+            guard connectedCount < max else {
+                state.lastError = "\(connectedCount) of \(max) devices are connected. Disconnect one first."
+                return
+            }
+        }
+
+        do {
+            try await request(connect ? Cmd.connectPairedDevice : Cmd.disconnectPairedDevice,
+                              payload: [UInt8(device.index)])
+        } catch {
+            guard link == links else { return }
+            state.lastError = error.localizedDescription
+            return
+        }
+        // A poll that times out or is refused only means "not there yet".
+        let deadline = ContinuousClock.now + peerConnectTimeout
+        while ContinuousClock.now < deadline, link == links {
+            let status = try? await request(Cmd.getPairedDeviceStatus, payload: [UInt8(device.index)])
+            if let status, status.count == 2, Int(status[0]) == device.index, (status[1] != 0) == connect { break }
+            try? await Task.sleep(for: peerPollInterval)
+        }
+        guard link == links else { return }
+
+        // By name: the index may have moved when the link changed.
+        let after = await loadPairedDevices()
+        guard link == links else { return }
+        let done = after?.devices.contains { $0.name == device.name && $0.isConnected == connect } == true
+        if done {
+            state.lastError = nil
+        } else if connect {
+            state.lastError = "\(device.name) did not connect. "
+                + "It may be off, out of range, or have forgotten the headphones."
+        } else {
+            state.lastError = "\(device.name) is still connected."
+        }
+    }
+
     // MARK: - Request plumbing
 
     @discardableResult
     func request(_ command: UInt16, payload: [UInt8] = [], timeout: Duration = .seconds(2)) async throws -> [UInt8] {
         if let reason = CommandSafety.rejectionReason(for: command, payload: payload) {
             throw TransportError.blockedCommand(reason: reason)
+        }
+        // CommandSafety cannot see the firmware; every send passes here.
+        if command == Cmd.disconnectPairedDevice, !state.canDisconnectOthers {
+            throw TransportError.blockedCommand(
+                reason: "0x1403 needs firmware 3.38.3 or newer; on 2.13.42 it erased a pairing")
         }
 
         let previous = lastRequest[command]
@@ -911,6 +1155,11 @@ public final class HeadphoneController: ObservableObject {
             }
         case Cmd.getBassBoost:
             if let value = frame.payload.first { state.bassBoost = value != 0 }
+        case Cmd.getPairedDeviceStatus:
+            // Re-read rather than patch: the list may have reordered, so the
+            // pushed index need not match the list held. Also recovers a
+            // list whose last read failed.
+            Task { [weak self] in await self?.refreshPairedDevices() }
         case Cmd.getCodec:
             if let value = frame.payload.first { state.codec = value }
         case Cmd.sampleRate:
@@ -1001,6 +1250,15 @@ public final class HeadphoneController: ObservableObject {
         } else {
             let curve = state.bands.map { "\($0.frequencyHz)Hz \(String(format: "%+.1f", $0.gainDb))dB" }
             lines.append("EQ:       " + curve.joined(separator: "  "))
+        }
+        if let devices = state.pairedDevices {
+            let max = state.maxConnections.map { ", up to \($0) at once" } ?? ""
+            lines.append("Paired:   \(devices.count) device\(devices.count == 1 ? "" : "s")\(max)")
+            for device in devices {
+                let marks = [device.isConnected ? "connected" : nil, device.isThisMac ? "this Mac" : nil]
+                    .compactMap { $0 }.joined(separator: ", ")
+                lines.append("  \(device.index): \(device.name)\(marks.isEmpty ? "" : " (\(marks))")")
+            }
         }
         if let touch = try? await request(Cmd.getTouchControls).first {
             // Inverted on this device: 0 means enabled.

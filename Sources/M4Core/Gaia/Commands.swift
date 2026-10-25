@@ -23,6 +23,7 @@ enum Cmd {
         static let battery: UInt8 = 3       // includes the charging push
         static let audio: UInt8 = 4         // codec and sample-rate pushes
         static let userEq: UInt8 = 8
+        static let deviceManagement: UInt8 = 10   // paired-device connect push
         static let transparency: UInt8 = 12
         static let anc: UInt8 = 13
     }
@@ -117,6 +118,31 @@ enum Cmd {
     /// MOMENTUM 4 (community capture, FW 3.37.3).
     static let getModelId: UInt16 = 0x1206
     static let momentum4ModelPrefix = "M4AEBT"
+
+    // Paired devices ----------------------------------------------------
+    /// Devices are addressed by a 0-based index alone; there is no address.
+    /// Indexes can reorder when a device reconnects, so a name read with the
+    /// index is checked again before acting on it. Every layout below is
+    /// from momentum4-control's captures on FW 3.37.3 and 3.38.3.
+    ///
+    /// -> [] ; <- count as u16 BE
+    static let getPairedDeviceCount: UInt16 = 0x1400
+    /// -> [index] ; <- [index, priority, connected 0/1, name..., 00]
+    static let getPairedDevice: UInt16 = 0x1401
+    /// -> [index] ; <- empty OK at once, before the link is up.
+    static let connectPairedDevice: UInt16 = 0x1402
+    /// -> [index] ; <- empty OK. Disconnects and keeps the pairing on
+    /// FW 3.38.3; erased a pairing on 2.13.42. `HeadphoneController.request`
+    /// refuses it below 3.38.3 (`DeviceState.canDisconnectOthers`).
+    static let disconnectPairedDevice: UInt16 = 0x1403
+    /// -> [index] ; <- [index, connected 0/1]. Also pushed as 0x1484.
+    static let getPairedDeviceStatus: UInt16 = 0x1404
+    /// -> [] ; <- [index] of the device asking, i.e. this Mac.
+    static let getOwnDeviceIndex: UInt16 = 0x1407
+    /// -> [] ; <- [n]. 2 on a MOMENTUM 4.
+    static let getMaxConnections: UInt16 = 0x1409
+    /// The most devices the app reads, and the largest index it sends.
+    static let maxPairedDevices = 16
 }
 
 /// Commands that must never be sent, and why.
@@ -130,11 +156,10 @@ enum CommandSafety {
     /// cycle. Two independent sweeps died here.
     static let bricksLink: Set<UInt16> = [0x0607, 0x0613, 0x0685]
 
-    /// Acts on a paired-device index. 0x1403 silently *forgets* that device —
-    /// it erased a phone's pairing during an indexed scan. The other three
-    /// share its signature (indexed payload, empty OK) and their effect is
-    /// unknown, which is reason enough.
-    static let destructive: Set<UInt16> = [0x1403, 0x0801, 0x0805, 0x0817]
+    /// Setters for voice prompts, sidetone and low latency (momentum4-control
+    /// catalogue). Only the prompts write is verified there; the app sends
+    /// none of them.
+    static let untestedWrites: Set<UInt16> = [0x0801, 0x0805, 0x0817]
 
     /// The 0x06xx group is power/system space and is known to reset the link
     /// at more ids than the three above. Only battery is allowed out of it.
@@ -144,8 +169,8 @@ enum CommandSafety {
         if bricksLink.contains(command) {
             return String(format: "0x%04X takes the headphones offline (power cycle required)", command)
         }
-        if destructive.contains(command) {
-            return String(format: "0x%04X acts on a paired-device index and can erase a pairing", command)
+        if untestedWrites.contains(command) {
+            return String(format: "0x%04X is a setter the app does not use", command)
         }
         if (0x0600...0x06FF).contains(command), !powerGroupAllowlist.contains(command) {
             return String(format: "0x%04X is in the 0x06xx power/system group, which resets the link", command)
@@ -163,7 +188,8 @@ enum CommandSafety {
     private static let allowed: [UInt16: ([UInt8]) -> Bool] = {
         let flag: ([UInt8]) -> Bool = { $0 == [0] || $0 == [1] }
         let features: Set<UInt8> = [Cmd.Feature.battery, Cmd.Feature.audio, Cmd.Feature.userEq,
-                                    Cmd.Feature.transparency, Cmd.Feature.anc]
+                                    Cmd.Feature.deviceManagement, Cmd.Feature.transparency, Cmd.Feature.anc]
+        let pairedIndex: ([UInt8]) -> Bool = { $0.count == 1 && Int($0[0]) < Cmd.maxPairedDevices }
         var rules: [UInt16: ([UInt8]) -> Bool] = [
             Cmd.registerNotification: { $0.count == 1 && features.contains($0[0]) },
             Cmd.setAncEnabled: flag,
@@ -183,14 +209,21 @@ enum CommandSafety {
             Cmd.getAllGains: { $0.count == 1 },
             Cmd.getBandGain: { $0.count == 1 && $0[0] < 16 },
             Cmd.getBandFrequency: { $0.count == 1 && $0[0] < 16 },
+            Cmd.getPairedDevice: pairedIndex,
+            Cmd.getPairedDeviceStatus: pairedIndex,
+            // The group's two actions; the deletes stay out. Disconnect is
+            // also gated on firmware, which this static list cannot see.
+            Cmd.connectPairedDevice: pairedIndex,
+            Cmd.disconnectPairedDevice: pairedIndex,
         ]
-        // Strictly empty. The settings getters sit beside ids that act on a
-        // device index, and "an id that answers an indexed payload with an
-        // empty OK is an action" (omarchy-momentum4 PROTOCOL.md). The battery
-        // read is the one id let out of the 0x06xx power group.
+        // Strictly empty. The settings getters sit beside untested setters,
+        // and "an id that answers an indexed payload with an empty OK is an
+        // action" (omarchy-momentum4 PROTOCOL.md). The battery read is the
+        // one id let out of the 0x06xx power group.
         for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall, Cmd.getCodec,
                    Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable, Cmd.getEqConfig,
-                   Cmd.getBassBoost, Cmd.getFirmwareVersion, Cmd.getTouchControls, Cmd.getModelId] {
+                   Cmd.getBassBoost, Cmd.getFirmwareVersion, Cmd.getTouchControls, Cmd.getModelId,
+                   Cmd.getPairedDeviceCount, Cmd.getOwnDeviceIndex, Cmd.getMaxConnections] {
             rules[id] = { $0.isEmpty }
         }
         return rules

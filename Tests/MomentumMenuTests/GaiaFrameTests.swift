@@ -186,9 +186,8 @@ final class CommandSafetyTests: XCTestCase {
         XCTAssertFalse(CommandSafety.isSafe(0x0685))
     }
 
-    /// The id that erased a phone's pairing.
-    func testPairingEraserIsBlocked() {
-        XCTAssertFalse(CommandSafety.isSafe(0x1403))
+    /// Setters beside the device settings that the app does not use.
+    func testUnusedSettersAreBlocked() {
         for id: UInt16 in [0x0801, 0x0805, 0x0817] {
             XCTAssertFalse(CommandSafety.isSafe(id))
         }

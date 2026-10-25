@@ -82,6 +82,33 @@ final class FakeHeadset {
     var rejects: Set<UInt16> = []
     /// What `0x0800` answers: AAC.
     var codec: UInt8 = 1
+    /// Paired devices by index. This Mac sits at `ownIndex`.
+    var paired: [(name: String, connected: Bool)] = [("MacBook", true), ("iPhone", false)]
+    var ownIndex: UInt8 = 0
+    var maxConnections: UInt8 = 2
+    /// Replace the own-index and limit replies, to model a misread.
+    var ownIndexReply: [UInt8]?
+    var maxConnectionsReply: [UInt8]?
+    /// Replaces the count reply, to model a misread.
+    var pairedCountReply: [UInt8]?
+    /// Replaces the entry reply for an index, to model a misread.
+    var pairedEntryReplies: [Int: [UInt8]] = [:]
+    /// How long an entry read takes to answer, by index; immediate otherwise.
+    var pairedEntryDelays: [Int: Duration] = [:]
+    /// Replaces every status reply, to model a misread.
+    var statusReply: [UInt8]?
+    /// Status polls a connect takes before the device shows connected. Nil
+    /// never connects, as when the phone has forgotten the pairing.
+    var pollsToConnect: Int? = 0
+    /// Sends the 0x1484 pushes captured around a connect: `[i, 1]` when it
+    /// comes up, `[i, 0]` twice when it never will.
+    var pushesDuringConnect = false
+    /// Every index a connect was sent for.
+    private(set) var connects: [Int] = []
+    /// Firmware as `0x1201` answers it; nil leaves it unanswered.
+    var firmware: [Int]?
+    /// The link change under way: the state it ends in, after so many polls.
+    private var pendingConnect: (index: Int, pollsLeft: Int?, connects: Bool)?
 
     var mode: NoiseMode { anc == 0 ? .off : (modeTable[5] == 1 ? .adaptive : .custom) }
     var curve: [Double] { bands.map(Gain.decode) }
@@ -126,6 +153,60 @@ final class FakeHeadset {
         case Cmd.getAllGains: return [Reply.ok(frame.command, bands)]
         case Cmd.getCodec: return [Reply.ok(frame.command, [codec])]
         case Cmd.setBandGain: bands[Int(value)] = frame.payload[1]
+        case Cmd.getPairedDeviceCount:
+            return [Reply.ok(frame.command, pairedCountReply ?? [0, UInt8(paired.count)])]
+        case Cmd.getOwnDeviceIndex: return [Reply.ok(frame.command, ownIndexReply ?? [ownIndex])]
+        case Cmd.getMaxConnections: return [Reply.ok(frame.command, maxConnectionsReply ?? [maxConnections])]
+        case Cmd.getPairedDevice:
+            let index = Int(value)
+            let reply: GaiaFrame
+            if let canned = pairedEntryReplies[index] {
+                reply = Reply.ok(frame.command, canned)
+            } else if index < paired.count {
+                let entry = paired[index]
+                // Priority equals the index in every capture; offset here so
+                // a parser reading the wrong byte fails.
+                reply = Reply.ok(frame.command,
+                                 [value, value &+ 7, entry.connected ? 1 : 0] + Array(entry.name.utf8) + [0])
+            } else {
+                reply = Reply.rejected(frame.command, code: GaiaError.indexOutOfRange)
+            }
+            guard let delay = pairedEntryDelays[index] else { return [reply] }
+            Task { @MainActor in
+                try? await Task.sleep(for: delay)
+                push(reply)
+            }
+            return []
+        case Cmd.getFirmwareVersion:
+            guard let firmware else { return Reply.device(battery: 50)(frame) }
+            return [Reply.ok(frame.command, firmware.flatMap { [UInt8($0 >> 8), UInt8($0 & 0xFF)] })]
+        case Cmd.disconnectPairedDevice:
+            guard Int(value) < paired.count else { return [Reply.rejected(frame.command)] }
+            pendingConnect = (Int(value), pollsToConnect, false)
+        case Cmd.connectPairedDevice:
+            connects.append(Int(value))
+            guard Int(value) < paired.count else { return [Reply.rejected(frame.command)] }
+            pendingConnect = (Int(value), pollsToConnect, true)
+            if pushesDuringConnect, pollsToConnect == nil {
+                let failed = Reply.notification(Cmd.getPairedDeviceStatus, [value, 0])
+                Task { @MainActor in push(failed); push(failed) }
+            }
+        case Cmd.getPairedDeviceStatus:
+            let index = Int(value)
+            guard index < paired.count else { return [Reply.rejected(frame.command, code: GaiaError.indexOutOfRange)] }
+            if let pending = pendingConnect, pending.index == index, let left = pending.pollsLeft {
+                if left == 0 {
+                    paired[index].connected = pending.connects
+                    pendingConnect = nil
+                    if pushesDuringConnect {
+                        let up = Reply.notification(Cmd.getPairedDeviceStatus, [value, pending.connects ? 1 : 0])
+                        Task { @MainActor in push(up) }
+                    }
+                } else {
+                    pendingConnect = (index, left - 1, pending.connects)
+                }
+            }
+            return [Reply.ok(frame.command, statusReply ?? [value, paired[index].connected ? 1 : 0])]
         default: return Reply.device(battery: 50)(frame)
         }
         return [Reply.ok(frame.command)]
