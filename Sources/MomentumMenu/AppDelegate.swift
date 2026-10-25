@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Left click opens the popover, right click opens the menu. Without
         // this the button only reports left clicks.
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        installMainMenu()
 
         preferences.onMenuBarIconVisibilityChanged = { [weak self] visible in
             self?.statusItem.isVisible = visible
@@ -236,11 +237,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         menu.addItem(disconnect)
 
         menu.addItem(.separator())
-        // No ⌘Q: key equivalents go to the active app, and this menu does not
-        // make the app active (that kept focus from the app in front), so ⌘Q
-        // here could quit that app instead.
-        let quit = item("Quit MomentumMenu", symbol: "xmark.circle",
-                        action: #selector(NSApplication.terminate(_:)))
+        // ⌘Q works while this menu is open. Once it closes, ⌘Q belongs to
+        // the app in front again: this menu does not activate the app.
+        let quit = item("Quit Momentum Menu", symbol: "xmark.circle",
+                        action: #selector(NSApplication.terminate(_:)), key: "q")
         quit.target = NSApp
         menu.addItem(quit)
 
@@ -250,6 +250,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    /// ⌘W and ⌘Q for the Settings window. A menu bar app shows no menu bar,
+    /// but its main menu still answers key equivalents while it is active.
+    private func installMainMenu() {
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Momentum Menu",
+                        action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let main = NSMenu()
+        for submenu in [appMenu, windowMenu] {
+            let holder = NSMenuItem()
+            holder.submenu = submenu
+            main.addItem(holder)
+        }
+        NSApp.mainMenu = main
     }
 
     private func item(_ title: String, symbol: String, action: Selector, key: String = "") -> NSMenuItem {
