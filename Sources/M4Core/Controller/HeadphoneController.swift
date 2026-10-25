@@ -202,11 +202,21 @@ public struct DeviceState: Sendable {
 
     /// "AAC · 44.1 kHz", or nil when nothing is playing or the codec is unknown.
     public var streamLabel: String? {
+        guard let name = codecName else { return nil }
+        guard let rate = sampleRateLabel else { return name }
+        return "\(name) · \(rate)"
+    }
+
+    /// "AAC", or nil when nothing is playing or the codec is unknown.
+    public var codecName: String? {
         guard let codec, codec != AudioCodec.none else { return nil }
-        let name = Int(codec) < AudioCodec.names.count ? AudioCodec.names[Int(codec)] : "Codec \(codec)"
-        guard let rate = sampleRateHz, rate > 0 else { return name }
-        let khz = String(format: "%g", Double(rate) / 1000)
-        return "\(name) · \(khz) kHz"
+        return Int(codec) < AudioCodec.names.count ? AudioCodec.names[Int(codec)] : "Codec \(codec)"
+    }
+
+    /// "44.1 kHz", or nil while no stream is running.
+    public var sampleRateLabel: String? {
+        guard codecName != nil, let rate = sampleRateHz, rate > 0 else { return nil }
+        return String(format: "%g kHz", Double(rate) / 1000)
     }
 
     /// True when the device is running firmware old enough to lack the

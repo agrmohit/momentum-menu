@@ -1,119 +1,167 @@
 import M4Core
 import SwiftUI
 
+/// The popover: a battery header over Control Center-style modules.
 struct MenuView: View {
     @ObservedObject var controller: HeadphoneController
-    @State private var pendingLevel: Double = 50
-    @State private var showAdvanced = false
-    @State private var showSettings = false
-
-    /// What the sliders display, which is not always what the device holds.
-    ///
-    /// A Slider repaints at its new value rather than travelling to it, so a
-    /// preset would blink into place however it was animated. These are stepped
-    /// through the intermediate positions instead, which is what actually moves
-    /// the knob.
-    @State private var shownGains: [Double] = []
-    @State private var tween: Task<Void, Never>?
-
-    private func moveGains(to targets: [Double], animated: Bool) {
-        tween?.cancel()
-        guard animated, shownGains.count == targets.count, !shownGains.isEmpty else {
-            shownGains = targets
-            return
-        }
-        let start = shownGains
-        tween = Task { @MainActor in
-            let steps = 18                       // ~0.3s at 60fps
-            for step in 1...steps {
-                if Task.isCancelled { return }
-                let t = Double(step) / Double(steps)
-                let eased = t * t * (3 - 2 * t)   // smoothstep, no abrupt start
-                shownGains = zip(start, targets).map { $0 + ($1 - $0) * eased }
-                try? await Task.sleep(for: .milliseconds(16))
-            }
-            if !Task.isCancelled { shownGains = targets }
-        }
-    }
+    /// Opens the Settings window, which AppDelegate owns.
+    let openSettings: () -> Void
+    @State private var showBands = false
 
     private var state: DeviceState { controller.state }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
+        VStack(spacing: 10) {
+            BatteryHeader(state: state) {
+                Task { await controller.refresh() }
+            }
 
             if state.connected {
-                noiseControl
-                Divider()
-                // Tighter than the sections around it, so the two disclosure
-                // rows read as one list.
-                VStack(alignment: .leading, spacing: 8) {
-                    equaliser
-                    if !state.settings.isEmpty {
-                        deviceSettings
+                NoiseControlModule(controller: controller)
+
+                HStack(spacing: 10) {
+                    EqualiserTile(controller: controller, showBands: $showBands)
+                    if let bass = state.bassBoost {
+                        BassBoostTile(controller: controller, isOn: bass)
                     }
                 }
-                Divider()
+
+                if showBands, !state.bands.isEmpty {
+                    EqualiserBands(controller: controller)
+                }
+
+                if !state.settings.isEmpty {
+                    HeadphoneSettingsRow(controller: controller)
+                }
+
+                if let error = state.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 footer
             } else {
-                disconnected
+                DisconnectedPanel(controller: controller)
             }
         }
         .padding(14)
-        .frame(width: 300)
-        .task {
-            pendingLevel = Double(state.noiseLevel ?? 50)
-            shownGains = state.bands.map(\.gainDb)
-        }
-        .onChange(of: state.noiseLevel) { _, new in
-            if let new { pendingLevel = Double(new) }
-        }
-        .onChange(of: state.bands.map(\.gainDb)) { _, new in
-            // Already there when the change came from dragging a slider.
-            guard shownGains != new else { return }
-            moveGains(to: new, animated: shownGains.count == new.count)
-        }
+        .frame(width: 320)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack {
-            Image(systemName: "headphones")
-                .font(.title2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(state.deviceName ?? "MOMENTUM 4")
-                    .font(.headline)
-                if let battery = state.batteryPercent {
-                    // Deliberately not red: red reads as a fault, and a low
-                    // battery is a normal state, not a malfunction. Orange
-                    // draws the eye without implying something is broken, and
-                    // red stays reserved for actual errors.
-                    Text("Battery \(battery)%" + (state.chargeLabel.map { " · \($0)" } ?? ""))
-                        .font(.caption)
-                        .foregroundStyle(state.isCharging == true ? .green
-                                         : (battery <= 20 ? .orange : .secondary))
-                } else if state.connected {
-                    Text("Battery unknown").font(.caption).foregroundStyle(.secondary)
-                }
-                // From the headphones, so it covers whichever device is playing.
-                if state.connected, let stream = state.streamLabel {
-                    Text(stream).font(.caption).foregroundStyle(.secondary)
-                        .help("What the headphones are playing, from whichever device")
-                }
+    private var footer: some View {
+        HStack(spacing: 8) {
+            if let firmware = state.firmware {
+                Text("Firmware \(firmware)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
             Spacer()
-            Button {
-                Task { await controller.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
+            Button(action: openSettings) {
+                Image(systemName: "gearshape")
             }
-            .buttonStyle(.borderless)
-            .help("Refresh")
+            .help("Settings")
+            Button {
+                controller.releaseHeadphones()
+            } label: {
+                Image(systemName: "power")
+            }
+            .help("Disconnect from this Mac, freeing one of the headphones' two connection slots "
+                  + "for another device. They stay paired, and this app won't reconnect until you ask.")
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.circle)
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+    }
+}
+
+/// The headphones inside a battery ring, with name, charge and stream.
+private struct BatteryHeader: View {
+    let state: DeviceState
+    let refresh: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Gauge(value: Double(state.batteryPercent ?? 0), in: 0...100) {
+                Text("Battery")
+            } currentValueLabel: {
+                Image(systemName: "headphones.over.ear")
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .gaugeStyle(.accessoryCircularCapacity)
+            .tint(ringColour)
+            .scaleEffect(1.3)
+            .frame(width: 70, height: 70)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(state.deviceName ?? "MOMENTUM 4")
+                    .font(.headline)
+                if let battery = state.batteryPercent, state.connected {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        let number = Text("\(battery)").font(.system(size: 26, weight: .semibold, design: .rounded))
+                        let unit = Text("%").font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                        Text("\(number)\(unit)")
+                            .monospacedDigit()
+                        if let charge = state.chargeLabel {
+                            Text(charge)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                } else {
+                    Text(state.connected ? "Battery unknown" : "Not connected")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if state.connected, let codec = state.codecName {
+                    HStack(spacing: 6) {
+                        Text(codec)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(.fill.tertiary, in: .capsule)
+                        if let rate = state.sampleRateLabel {
+                            Text(rate)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .help("What the headphones are playing, from whichever device")
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if state.connected {
+                Button(action: refresh) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
+                .help("Refresh")
+            }
         }
     }
 
-    private var disconnected: some View {
+    /// Deliberately not red when low: red reads as a fault, and a low battery
+    /// is a normal state. Orange draws the eye without implying breakage.
+    private var ringColour: Color {
+        guard state.connected else { return .secondary }
+        if state.isCharging == true { return .green }
+        return (state.batteryPercent ?? 100) <= 20 ? .orange : .green
+    }
+}
+
+/// Shown while connecting, after a hand-off, or when the headphones are away.
+private struct DisconnectedPanel: View {
+    @ObservedObject var controller: HeadphoneController
+
+    private var state: DeviceState { controller.state }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if state.isConnecting {
                 HStack(spacing: 8) {
@@ -142,350 +190,16 @@ struct MenuView: View {
                     .foregroundStyle(.tertiary)
             }
             HStack {
-                Button(state.releasedByUser ? "Reconnect" : "Try again") {
+                Button(state.releasedByUser ? "Reconnect" : "Try Again") {
                     Task { await controller.connect(userInitiated: true) }
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(state.isConnecting)
                 Spacer()
-                Button("Exit App") { NSApplication.shared.terminate(nil) }
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.bordered)
             }
         }
-    }
-
-    // MARK: - Noise control
-
-    private var noiseControl: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("NOISE CONTROL").font(.caption2).foregroundStyle(.secondary)
-
-            segmented(NoiseMode.allCases, selected: state.noiseMode ?? .off,
-                      label: \.rawValue, help: \.explanation) { mode in
-                Task { await controller.setNoiseMode(mode) }
-            }
-
-            if state.noiseMode == .custom {
-                VStack(alignment: .leading, spacing: 2) {
-                    // No `step:`. NSSlider draws a tick per step, so stepping
-                    // by 1 over 0...100 covers the track in a hundred of them.
-                    // Rounding happens on the way to the device instead.
-                    Slider(value: snapping($pendingLevel, to: 50, within: 3), in: 0...100) { editing in
-                        if !editing {
-                            Task { await controller.setNoiseLevel(Int(pendingLevel.rounded())) }
-                        }
-                    }
-                    .background { centreMark }
-                    HStack {
-                        Text("Noise cancelling").font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("Transparency").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                // Custom only, as in omarchy-momentum4's panel.
-                if let antiWind = state.antiWind {
-                    HStack(spacing: 8) {
-                        Text("Anti-wind").font(.caption).foregroundStyle(.secondary)
-                        segmented(AntiWind.shown, selected: antiWind, label: \.label,
-                                  help: { _ in "Reduces wind noise picked up by the microphones" }) { setting in
-                            guard setting != antiWind else { return }
-                            Task { await controller.setAntiWind(setting) }
-                        }
-                    }
-                }
-            } else if let mode = state.noiseMode {
-                Text(mode.explanation).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// Hand-rolled rather than Picker(.segmented): that colours the selection
-    /// with the system accent, which renders gray if the user has picked
-    /// graphite.
-    private func segmented<Option: Hashable>(_ options: [Option], selected: Option,
-                                             label: @escaping (Option) -> String,
-                                             help: @escaping (Option) -> String,
-                                             choose: @escaping (Option) -> Void) -> some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.self) { option in
-                let isSelected = option == selected
-                Button {
-                    choose(option)
-                } label: {
-                    Text(label(option))
-                        .font(.caption)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                        .background(isSelected ? Color.accentColor : Color.clear)
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(help(option))
-            }
-        }
-        .background(Color.primary.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Equaliser
-
-    private var equaliser: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("EQUALISER").font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                if let bass = state.bassBoost {
-                    // Smart Control's name for it.
-                    Toggle("Bass Boost", isOn: Binding(
-                        get: { bass },
-                        set: { on in Task { await controller.setBassBoost(on) } }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
-                }
-            }
-
-            // Four to a row: eight of Sennheiser's, then our own.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
-                ForEach(state.equaliserSupported ? EqPreset.all : []) { preset in
-                    let isActive = preset.name == activePreset?.name
-                    Button {
-                        Task { await controller.apply(preset) }
-                    } label: {
-                        // Filled like the selected segment above: a tinted
-                        // bordered button barely differs from the rest.
-                        Text(preset.name)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .frame(maxWidth: .infinity)   // share the width evenly
-                            .padding(.vertical, 3)
-                            .background(isActive ? Color.accentColor : Color.primary.opacity(0.1))
-                            .foregroundStyle(isActive ? Color.white : Color.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(preset.verified
-                          ? "Matches Sennheiser's own \(preset.name) curve"
-                          : "Our own curve, not one of Sennheiser's presets")
-                }
-            }
-
-            if state.bands.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    if state.needsFirmwareUpdateForEq {
-                        Text("Needs firmware 3.x")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("The equaliser and bass boost were added in firmware 3. "
-                             + "You're on \(state.firmware ?? "2.x"). Update in Sennheiser's "
-                             + "iPhone app — this app won't write firmware.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text("Equaliser not available on this device.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                // Per-band parametric gains are not what most people want from
-                // a menu bar: the presets are. Tucked away, but one click deep
-                // rather than absent.
-                // Deliberately not a DisclosureGroup. That animates its own
-                // expansion, so the content height changes on every frame of
-                // the animation and the popover resizes to match each one —
-                // which reads as the whole box juddering up and down rather
-                // than a section opening. A plain button changes the layout
-                // exactly once, and the transaction makes sure of it.
-                // Spacing 0: the stack's spacing would stay around the
-                // collapsed sliders, so their gap goes inside the collapse.
-                VStack(alignment: .leading, spacing: 0) {
-                    Button {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) { showAdvanced.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
-                                .font(.caption2)
-                            Text("Advanced Audio Settings").font(.caption)
-                            Spacer()
-                        }
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    // Always built, merely collapsed. Creating five slider-backed
-                    // views at click time is what made opening this feel slow;
-                    // they are cheap to keep and instant to reveal.
-                    bandSliders
-                        .padding(.top, 8)
-                        .frame(height: showAdvanced ? nil : 0, alignment: .top)
-                        .opacity(showAdvanced ? 1 : 0)
-                        .clipped()
-                        .allowsHitTesting(showAdvanced)
-                        .accessibilityHidden(!showAdvanced)
-                }
-            }
-        }
-    }
-
-    private var bandSliders: some View {
-        // Keyed on the whole curve, so a preset slides every band together.
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(state.bands) { band in
-                HStack(spacing: 8) {
-                    Text(band.label)
-                        .font(.caption2.monospacedDigit())
-                        .frame(width: 34, alignment: .trailing)
-                        .foregroundStyle(.secondary)
-                    Slider(
-                        value: snapping(Binding(
-                            get: { shownGain(band) },
-                            set: { value in
-                                // Track the drag locally; the device is told
-                                // once, on release. Writing every 0.1 dB would
-                                // flood the control channel.
-                                tween?.cancel()
-                                if shownGains.indices.contains(band.id) {
-                                    shownGains[band.id] = value
-                                }
-                            }
-                        ), to: 0, within: 0.3),
-                        in: state.eqMinGainDb...state.eqMaxGainDb,
-                        onEditingChanged: { editing in
-                            guard !editing else { return }
-                            // Snap to the device's own 0.1 dB granularity here
-                            // rather than via `step:`, which would draw 120
-                            // tick marks across the track.
-                            let value = (shownGain(band) * 10).rounded() / 10
-                            if shownGains.indices.contains(band.id) {
-                                shownGains[band.id] = value
-                            }
-                            Task { await controller.setBandGain(band: band.id, db: value) }
-                        }
-                    )
-                    // Five stacked rows: the full-size knob dwarfs them.
-                    .controlSize(.small)
-                    // 0 dB is the middle only because the device's range is
-                    // symmetric (-6 to +6 on 3.38.3).
-                    .background { if -state.eqMinGainDb == state.eqMaxGainDb { centreMark } }
-                    Text(String(format: "%+.1f", shownGain(band)))
-                        .font(.caption2.monospacedDigit())
-                        .frame(width: 34, alignment: .leading)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    /// A short tick behind a slider's track, at its middle.
-    private var centreMark: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.6))
-            .frame(width: 1, height: 10)
-    }
-
-    /// Pulls a dragged value onto `centre` when it comes within `within`,
-    /// with a tap on a Force Touch trackpad as it lands, as Spotlight's
-    /// sliders do.
-    private func snapping(_ value: Binding<Double>, to centre: Double, within: Double) -> Binding<Double> {
-        Binding(
-            get: { value.wrappedValue },
-            set: { new in
-                let snapped = abs(new - centre) < within ? centre : new
-                if snapped == centre, value.wrappedValue != centre {
-                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-                }
-                value.wrappedValue = snapped
-            }
-        )
-    }
-
-    /// Judged on the device's curve, not the sliders mid-animation.
-    private var activePreset: EqPreset? { EqPreset.matching(state.bands.map(\.gainDb)) }
-
-    private func shownGain(_ band: EqBand) -> Double {
-        shownGains.indices.contains(band.id) ? shownGains[band.id] : band.gainDb
-    }
-
-    // MARK: - Device settings
-
-    /// Collapsed like Advanced Audio Settings, for the same reasons.
-    private var deviceSettings: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { showSettings.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: showSettings ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
-                    Text("Headphone Settings").font(.caption)
-                    Spacer()
-                }
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(DeviceSetting.allCases, id: \.self) { setting in
-                    if let on = state.settings[setting] {
-                        let gated = setting.needsOnHead && state.settings[.onHeadDetection] == false
-                        Toggle(setting.label, isOn: Binding(
-                            get: { on },
-                            set: { value in Task { await controller.set(setting, on: value) } }
-                        ))
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .font(.caption)
-                        .disabled(gated)
-                        .help(gated ? "Needs on-head detection" : setting.explanation)
-                    }
-                }
-            }
-            .padding(.top, 6)
-            .frame(height: showSettings ? nil : 0, alignment: .top)
-            .opacity(showSettings ? 1 : 0)
-            .clipped()
-            .allowsHitTesting(showSettings)
-            .accessibilityHidden(!showSettings)
-        }
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            if let firmware = state.firmware {
-                Text("Firmware \(firmware)").font(.caption2).foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Button("Disconnect") { controller.releaseHeadphones() }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .help("Disconnect from this Mac, freeing one of the headphones' "
-                      + "two connection slots for another device. They stay paired, "
-                      + "and this app won't reconnect until you ask it to.")
-            Button("Exit App") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
-                .font(.caption)
-        }
-        .overlay(alignment: .top) {
-            if let error = state.lastError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .offset(y: -16)
-            }
-        }
+        .tile()
     }
 }

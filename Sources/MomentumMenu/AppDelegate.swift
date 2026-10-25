@@ -66,7 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // close, in popoverShouldClose.
         popover.animates = false
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: MenuView(controller: controller))
+        let hosting = NSHostingController(rootView: MenuView(controller: controller) { [weak self] in
+            self?.popover.performClose(nil)
+            self?.openSettings()
+        })
+        // The popover reads the content's size and re-anchors under the status
+        // item. Left to resize the window itself, the host grew it upwards
+        // from its bottom edge, pushing the header off the top of the screen.
+        hosting.sizingOptions = .preferredContentSize
+        popover.contentViewController = hosting
 
         controller.$state
             .receive(on: RunLoop.main)
@@ -192,6 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(nil)   // delegate turns the fade on
         } else {
+            // Sized before it appears, so it opens at its final height.
+            if let content = popover.contentViewController?.view {
+                content.layoutSubtreeIfNeeded()
+                popover.contentSize = content.fittingSize
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             Task {
