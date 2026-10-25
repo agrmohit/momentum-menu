@@ -103,8 +103,12 @@ private struct SoundTileLabel: View {
 /// on release: writing every 0.1 dB would flood the control channel.
 struct EqualiserBands: View {
     @ObservedObject var controller: HeadphoneController
-    /// What the sliders show while dragged, before the device is told.
+    /// What the sliders show while dragged, and until the device has the value.
     @State private var dragged: [Int: Double] = [:]
+    /// Bands being dragged with the pointer.
+    @State private var editing: Set<Int> = []
+    /// A pending write for a keyboard or VoiceOver change, by band.
+    @State private var keyWrites: [Int: Task<Void, Never>] = [:]
 
     private var state: DeviceState { controller.state }
 
@@ -120,12 +124,13 @@ struct EqualiserBands: View {
                         Text("\(band.label) Hz")
                     } ticks: {
                         SliderTick(0)
-                    } onEditingChanged: { editing in
-                        guard !editing else { return }
-                        // The device works in 0.1 dB steps.
-                        let db = ((dragged[band.id] ?? band.gainDb) * 10).rounded() / 10
-                        dragged[band.id] = nil
-                        Task { await controller.setBandGain(band: band.id, db: db) }
+                    } onEditingChanged: { isEditing in
+                        if isEditing {
+                            editing.insert(band.id)
+                        } else {
+                            editing.remove(band.id)
+                            write(band)
+                        }
                     }
                     .labelsHidden()
                     .controlSize(.small)
@@ -143,7 +148,33 @@ struct EqualiserBands: View {
     private func gain(_ band: EqBand) -> Binding<Double> {
         snapping(Binding(
             get: { dragged[band.id] ?? band.gainDb },
-            set: { dragged[band.id] = $0 }
+            set: { value in
+                dragged[band.id] = value
+                // Keyboard and VoiceOver steps may arrive without editing
+                // callbacks, so they are written once they settle.
+                guard !editing.contains(band.id) else { return }
+                keyWrites[band.id]?.cancel()
+                keyWrites[band.id] = Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    write(band)
+                }
+            }
         ), to: 0, within: 0.3)
+    }
+
+    /// Sends the shown value, and keeps showing it until the device has it,
+    /// so the thumb does not jump back for a round trip.
+    private func write(_ band: EqBand) {
+        keyWrites[band.id]?.cancel()
+        keyWrites[band.id] = nil
+        // The device works in 0.1 dB steps.
+        let db = ((dragged[band.id] ?? band.gainDb) * 10).rounded() / 10
+        dragged[band.id] = db
+        Task {
+            await controller.setBandGain(band: band.id, db: db)
+            // A newer drag of this band owns the value now.
+            if dragged[band.id] == db, !editing.contains(band.id) { dragged[band.id] = nil }
+        }
     }
 }

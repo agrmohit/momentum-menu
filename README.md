@@ -28,7 +28,7 @@ open -a MomentumMenu
 ```
 
 - The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
-- Left click for the popover. Right click for Settings, Refresh, Disconnect and Quit (Cmd+Q works there too).
+- Left click for the popover. Right click for Settings, Refresh, Disconnect and Quit.
 - Settings > App Icon picks Starfield (bundled), Sleepy or Ghost, and the app sets the choice again at launch. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
 - `swift test` runs the suite without hardware.
 
@@ -42,7 +42,7 @@ GAIA v3 frames start `FF 03 00 LL`, then the vendor (`0x0495`) and the command i
 | Battery | `0x0603` | Steps of 10 only. HFP and Qualcomm's `001D:1A01` give the same steps, so finer is not possible. |
 | Codec | `0x0800` read, `0x0880` push | One byte, Smart Control's enum: 0 SBC, 1 AAC, 2 aptX, 3 aptX LL, 5 aptX HD, 8 aptX Adaptive, 9 aptX Lossless, 10 LC3, `FF` none. 11 is seen but unexplained. |
 | Sample rate | `0x089A` push | u32 big-endian Hz. Covers whichever device is streaming. |
-| Noise mode table | `0x1A00` | Written whole, Custom mode only. A write can reset the level, so the app reads it back afterwards. |
+| Noise mode table | `0x1A00` | Adaptive is written as an `[id, value]` pair, or the whole table where the pair is rejected; anti-wind always as the whole table. A write can reset the level, so the app skips no-op writes and reads the level back after the rest. |
 | EQ and bass boost | `0x10xx` | Firmware 3.x only; 2.x rejects them with `0x05`. |
 
 Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):

@@ -63,11 +63,13 @@ struct MenuView: View {
                 Image(systemName: "gearshape")
             }
             .help("Settings")
+            .accessibilityLabel("Settings")
             Button {
                 controller.releaseHeadphones()
             } label: {
                 Image(systemName: "power")
             }
+            .accessibilityLabel("Disconnect")
             .help("Disconnect from this Mac, freeing one of the headphones' two connection slots "
                   + "for another device. They stay paired, and this app won't reconnect until you ask.")
         }
@@ -144,6 +146,7 @@ private struct BatteryHeader: View {
                 Button(action: refresh) {
                     Image(systemName: "arrow.clockwise")
                 }
+                .accessibilityLabel("Refresh")
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.circle)
                 .help("Refresh")

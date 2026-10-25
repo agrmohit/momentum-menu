@@ -236,15 +236,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         menu.addItem(disconnect)
 
         menu.addItem(.separator())
+        // No ⌘Q: key equivalents go to the active app, and this menu does not
+        // make the app active (that kept focus from the app in front), so ⌘Q
+        // here could quit that app instead.
         let quit = item("Quit MomentumMenu", symbol: "xmark.circle",
-                        action: #selector(NSApplication.terminate(_:)), key: "q")
+                        action: #selector(NSApplication.terminate(_:)))
         quit.target = NSApp
         menu.addItem(quit)
-
-        // Key equivalents go to the active app. A menu bar app is not active
-        // until something of its own is focused, so without this ⌘Q in this
-        // menu reached whichever app was in front.
-        NSApp.activate()
 
         // Attaching the menu and clicking the button is what positions it under
         // the status item; it is detached again so the next left click still

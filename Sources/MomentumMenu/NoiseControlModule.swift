@@ -6,6 +6,9 @@ import SwiftUI
 struct NoiseControlModule: View {
     @ObservedObject var controller: HeadphoneController
     @State private var pendingLevel: Double = 50
+    @State private var draggingLevel = false
+    /// A pending write for a keyboard or VoiceOver change.
+    @State private var keyWrite: Task<Void, Never>?
 
     private var state: DeviceState { controller.state }
 
@@ -38,7 +41,7 @@ struct NoiseControlModule: View {
 
     @ViewBuilder
     private var customControls: some View {
-        Slider(value: snapping($pendingLevel, to: 50, within: 3), in: 0...100, neutralValue: 50) {
+        Slider(value: snapping(level, to: 50, within: 3), in: 0...100, neutralValue: 50) {
             Text("Noise level")
         } minimumValueLabel: {
             Image(systemName: "waveform.slash")
@@ -51,8 +54,8 @@ struct NoiseControlModule: View {
         } ticks: {
             SliderTick(50)
         } onEditingChanged: { editing in
-            guard !editing else { return }
-            Task { await controller.setNoiseLevel(Int(pendingLevel.rounded())) }
+            draggingLevel = editing
+            if !editing { writeLevel() }
         }
         .labelsHidden()
         .sensoryFeedback(.alignment, trigger: pendingLevel) { _, new in new == 50 }
@@ -79,6 +82,32 @@ struct NoiseControlModule: View {
         }
     }
 
+    /// The slider's value. Only the slider sets it, so a change here is the
+    /// user's; device readings go to `pendingLevel` directly.
+    private var level: Binding<Double> {
+        Binding(
+            get: { pendingLevel },
+            set: { value in
+                pendingLevel = value
+                // Keyboard and VoiceOver steps may arrive without editing
+                // callbacks, so they are written once they settle.
+                guard !draggingLevel else { return }
+                keyWrite?.cancel()
+                keyWrite = Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    guard !Task.isCancelled else { return }
+                    writeLevel()
+                }
+            }
+        )
+    }
+
+    private func writeLevel() {
+        keyWrite?.cancel()
+        keyWrite = nil
+        Task { await controller.setNoiseLevel(Int(pendingLevel.rounded())) }
+    }
+
     private func modeButton(_ mode: NoiseMode) -> some View {
         let isSelected = state.noiseMode == mode
         return VStack(spacing: 6) {
@@ -92,11 +121,14 @@ struct NoiseControlModule: View {
             .buttonStyle(.plain)
             .contentShape(.circle)
             .help(mode.explanation)
+            .accessibilityLabel(mode.rawValue)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
 
             Text(mode.rawValue)
                 .font(.caption)
                 .fontWeight(isSelected ? .semibold : .regular)
                 .foregroundStyle(isSelected ? .primary : .secondary)
+                .accessibilityHidden(true)   // the button carries the name
         }
     }
 }
