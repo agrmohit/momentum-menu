@@ -24,7 +24,7 @@ struct SettingsView: View {
                         Text("Hide Menu Bar Icon")
                         // The icon is the only way in; reopening the app leads here.
                         if preferences.hideMenuBarIcon {
-                            Text("Open MomentumMenu again to come back here.")
+                            Text("Open Momentum Menu again to come back here.")
                         }
                     } icon: { Badge("menubar.rectangle", .blue) }
                 }
@@ -55,7 +55,7 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 } label: {
                     Label {
-                        Text("MomentumMenu")
+                        Text("Momentum Menu")
                         Text("Unofficial. Not affiliated with Sennheiser or Sonova.")
                     } icon: { Badge("headphones.over.ear", .indigo) }
                 }
