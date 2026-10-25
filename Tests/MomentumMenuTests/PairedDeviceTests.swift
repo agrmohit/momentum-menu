@@ -319,7 +319,7 @@ final class PairedDeviceTests: XCTestCase {
     func testAReadThatOutlivesTheLinkShowsNothing() async {
         let device = FakeHeadset()
         let armed = Box(false)
-        let (controller, fake) = await connected(device) { frame, fake in
+        let (controller, _) = await connected(device) { frame, fake in
             guard armed.value, frame.command == Cmd.getPairedDevice, frame.payload == [1] else { return nil }
             // The reply first, then the drop, before the read resumes.
             let replies = device.respond(frame, push: { fake.push($0) })
