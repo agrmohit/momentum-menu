@@ -1,5 +1,5 @@
-# Builds a DMG for a pushed v* tag, attests where it came from, and publishes
-# the release, once CI has passed on the tagged commit. The app is ad hoc
+# For a pushed v* tag: checks the tag against build.sh, runs CI, then builds a
+# DMG, attests where it came from and publishes the release. The app is ad hoc
 # signed, not notarised: the attestation is what lets a download be checked
 # against this repo and commit.
 name: Release
@@ -18,7 +18,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # First and cheap: a tag that does not match build.sh, or has no notes,
+  # fails here instead of after a full CI run.
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches build.sh and has notes
+        run: make release-check TAG="$GITHUB_REF_NAME"
+
   ci:
+    needs: release-check
     uses: ./.github/workflows/ci.yml
 
   release:
@@ -33,9 +44,6 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check the tag matches build.sh and has notes
-        run: make release-check TAG="$GITHUB_REF_NAME"
 
       - name: Build the DMG and its checksum
         run: make dmg
