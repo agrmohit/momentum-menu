@@ -35,12 +35,13 @@ for icon in $ICONS; do
     for slot in $SLOTS; do
         IFS=: read -r name px art <<< "$slot"
         # A fixed 1024 window, cropped to the icon: see render.html for why.
-        # Chrome logs harmless task-policy errors on macOS; the checks below
-        # decide success.
+        # Chrome logs harmless task-policy errors on macOS, and its exit status
+        # is ignored: the checks below decide success, and say what failed.
         "$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
             --default-background-color=00000000 --window-size=1024,1024 \
             --screenshot="$set/$name.png" \
-            "file://$PWD/render.html?id=$id&art=$art&shape=$shape&px=$px" 2>/dev/null
+            "file://$PWD/render.html?id=$id&art=$art&shape=$shape&px=$px" 2>/dev/null || true
+        [ -f "$set/$name.png" ] || { echo "render failed: Chrome wrote no $set/$name.png"; exit 1; }
         sips --cropToHeightWidth "$px" "$px" "$set/$name.png" >/dev/null
         [ "$(sips -g pixelWidth "$set/$name.png" | awk '/pixelWidth/ { print $2 }')" = "$px" ] ||
             { echo "render failed: $set/$name.png"; exit 1; }

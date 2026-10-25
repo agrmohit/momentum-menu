@@ -162,7 +162,10 @@ final class AntiWindTests: XCTestCase {
             fake.respond = { [weak fake] in device.respond($0, push: { fake?.push($0) }) }
             let controller = HeadphoneController(transport: fake)
             await controller.connect()
-            precondition(controller.state.antiWind == .max, "the read before the push must land")
+            guard controller.state.antiWind == .max else {
+                XCTFail("\(row.name): the read before the push must land")
+                continue
+            }
             fake.push(Reply.notification(Cmd.getModeTable, row.table))
             // A malformed push leaves the last good reading alone.
             XCTAssertEqual(controller.state.antiWind, row.shown ?? .max, row.name)
@@ -195,9 +198,15 @@ final class AntiWindTests: XCTestCase {
             fake.respond = { [weak fake] in device.respond($0, push: { fake?.push($0) }) }
             let controller = HeadphoneController(transport: fake)
             await controller.connect()
-            precondition(controller.state.noiseLevel == 40, "the level must be read before the write")
+            guard controller.state.noiseLevel == 40 else {
+                XCTFail("\(row.name): the level must be read before the write")
+                continue
+            }
             await row.action.apply(to: controller)
-            precondition(!device.modeWrites.isEmpty, "the action must write the table")
+            guard !device.modeWrites.isEmpty else {
+                XCTFail("\(row.name): the action must write the table")
+                continue
+            }
             XCTAssertEqual(controller.state.noiseLevel, Int(device.level), row.name)
         }
     }
@@ -234,7 +243,10 @@ final class AntiWindTests: XCTestCase {
                 XCTFail("\(row.name): did not finish")
                 continue
             }
-            precondition(slider != nil, "the read-back must go out")
+            guard slider != nil else {
+                XCTFail("\(row.name): the read-back must go out")
+                continue
+            }
             XCTAssertEqual(controller.state.noiseLevel, Int(device.level), row.name)
         }
     }

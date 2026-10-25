@@ -83,7 +83,10 @@ final class StreamInfoTests: XCTestCase {
     func testPushesUpdateCodecAndRate() async {
         for row in Self.pushRows {
             let (controller, fake) = await connected()
-            precondition(controller.state.codec == 1, "the codec read must land before the pushes")
+            guard controller.state.codec == 1 else {
+                XCTFail("\(row.name): the codec read must land before the pushes")
+                continue
+            }
             for push in row.pushes { fake.push(push) }
             XCTAssertTrue(controller.state.codec == row.codec && controller.state.sampleRateHz == row.rate,
                           "\(row.name): codec \(String(describing: controller.state.codec)), "
@@ -95,7 +98,7 @@ final class StreamInfoTests: XCTestCase {
     func testDisconnectClearsTheStream() async {
         let (controller, fake) = await connected()
         fake.push(Reply.notification(Cmd.sampleRate, [0, 0, 0xAC, 0x44]))
-        precondition(controller.state.streamLabel != nil, "the stream must be known first")
+        guard controller.state.streamLabel != nil else { return XCTFail("the stream must be known first") }
         fake.drop()
         XCTAssertNil(controller.state.streamLabel)
     }

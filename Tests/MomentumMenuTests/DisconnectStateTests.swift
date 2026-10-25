@@ -127,7 +127,13 @@ final class DisconnectStateTests: XCTestCase {
                     }
                 }
             }
-            while fake.sent.isEmpty { await Task.yield() }
+            // Bounded: a request refused before sending would spin forever.
+            let deadline = ContinuousClock.now + .seconds(2)
+            while fake.sent.isEmpty, ContinuousClock.now < deadline { await Task.yield() }
+            guard !fake.sent.isEmpty else {
+                XCTFail("\(row.name): nothing was sent")
+                continue
+            }
             Self.end(row.ending, fake, controller)
 
             let failures = await results(of: requests, within: .seconds(5))

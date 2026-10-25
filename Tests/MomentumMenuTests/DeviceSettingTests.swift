@@ -120,7 +120,10 @@ final class DeviceSettingTests: XCTestCase {
             let device = FakeHeadset()
             let (controller, fake) = await connected(device)
             let start = controller.state.settings[setting]
-            precondition(start != nil, "\(setting): the first read must land")
+            guard start != nil else {
+                XCTFail("\(setting): the first read must land")
+                continue
+            }
 
             fake.respond = { [weak fake] frame in
                 let replies = device.respond(frame, push: { fake?.push($0) })
@@ -142,7 +145,10 @@ final class DeviceSettingTests: XCTestCase {
                 XCTFail("\(setting): did not finish")
                 continue
             }
-            precondition(toggle != nil, "\(setting): the toggle must start")
+            guard toggle != nil else {
+                XCTFail("\(setting): the toggle must start")
+                continue
+            }
             let stored = device.settings[setting.getter]
             XCTAssertEqual(controller.state.settings[setting],
                            stored.map { setting.isInverted ? $0 == 0 : $0 != 0 }, "\(setting)")
