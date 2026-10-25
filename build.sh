@@ -39,8 +39,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>                     <string>MomentumMenu</string>
     <key>CFBundleDisplayName</key>              <string>Momentum Menu</string>
     <key>CFBundleIdentifier</key>               <string>com.agrmohit.momentummenu</string>
-    <key>CFBundleVersion</key>                  <string>2.0.0</string>
-    <key>CFBundleShortVersionString</key>       <string>2.0.0</string>
+    <key>CFBundleVersion</key>                  <string>2.1.0</string>
+    <key>CFBundleShortVersionString</key>       <string>2.1.0</string>
     <key>CFBundleExecutable</key>               <string>MomentumMenu</string>
     <key>CFBundlePackageType</key>              <string>APPL</string>
     <key>CFBundleIconFile</key>                 <string>AppIcon</string>
