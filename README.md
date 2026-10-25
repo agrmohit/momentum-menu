@@ -20,8 +20,23 @@ A macOS menu bar app for the Sennheiser MOMENTUM 4.
   </tr>
 </table>
 
-> [!WARNING]
-> The protocol is reverse-engineered. Never send anything in `0x06xx` other than the battery read: `0x0605` with an empty payload powered the headphones off three times. See [Protocol notes](#protocol-notes).
+> [!CAUTION]
+> **Unofficial, reverse-engineered, and not notarised.** Use it at your own risk.
+>
+> - **Unofficial:** not made, endorsed or supported by Sennheiser or Sonova.
+> - **Reverse-engineered:** the headphones' control protocol is undocumented. Every command comes from community captures, and a firmware update can change what one does.
+> - **Hazardous ids:** some ids reset the link, power the headphones off or erase pairings. The app sends only commands on its allow-list. If you change it, never send anything in `0x06xx` but the battery read: `0x0605` with an empty payload powered them off three times. See [Protocol notes](#protocol-notes).
+> - **Not notarised:** the app is ad hoc signed, not signed by an Apple developer or checked by Apple, so macOS blocks its first launch. [Download](#download) says how to verify a release and open it.
+
+## Download
+
+[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation and a SHA-256 file. Needs macOS 26 on Apple silicon.
+
+```sh
+gh attestation verify MomentumMenu-*.dmg -R agrmohit/momentum-menu
+```
+
+The app is ad hoc signed, not notarised, so macOS blocks its first launch whatever the attestation says. Open it once, then choose **Open Anyway** in System Settings > Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/MomentumMenu.app`.
 
 ## Build and run
 

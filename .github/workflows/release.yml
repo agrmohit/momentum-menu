@@ -1,0 +1,73 @@
+# Builds a DMG for a pushed v* tag, attests where it came from, and publishes
+# the release. The app is ad hoc signed, not notarised: the attestation is
+# what lets a download be checked against this repo and commit.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Read-only by default; the one job raises what it needs.
+permissions:
+  contents: read
+
+# One publish per tag at a time, never cancelled halfway through.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write           # create the release
+      id-token: write           # Sigstore certificate for the attestation
+      attestations: write       # store the attestation
+      artifact-metadata: write  # the attestation's storage record
+    env:
+      # The image's default today, named so an image update cannot change
+      # the toolchain silently; the job fails if it is ever removed.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag on a commit whose build.sh says another version would ship an
+      # app reporting the wrong version.
+      - name: Check the tag matches build.sh and has notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          grep -q "<string>$version</string>" build.sh ||
+            { echo "::error::build.sh is not at $version"; exit 1; }
+          [ -f "docs/releases/$GITHUB_REF_NAME.md" ] ||
+            { echo "::error::docs/releases/$GITHUB_REF_NAME.md is missing"; exit 1; }
+
+      - name: Test
+        run: swift test
+
+      - name: Build
+        run: ./build.sh release
+
+      # ULMO (LZMA) is about a quarter smaller than UDZO; macOS 14 and later
+      # mount it, and the app needs 26.
+      - name: Make the DMG and its checksum
+        run: |
+          dmg="MomentumMenu-${GITHUB_REF_NAME#v}.dmg"
+          stage="$RUNNER_TEMP/dmg"
+          mkdir -p "$stage"
+          cp -R build/MomentumMenu.app "$stage/"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname "Momentum Menu" -srcfolder "$stage" -format ULMO -ov "$dmg"
+          shasum -a 256 "$dmg" > "$dmg.sha256"
+
+      # Before the release exists, so no release is ever public unattested.
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: MomentumMenu-*.dmg
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" MomentumMenu-*.dmg MomentumMenu-*.dmg.sha256 \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"
