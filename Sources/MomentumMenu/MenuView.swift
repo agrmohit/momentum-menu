@@ -82,59 +82,64 @@ struct MenuView: View {
 private struct BatteryHeader: View {
     let state: DeviceState
     let refresh: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var onCable: Bool { state.connected && state.isCharging == true }
+    /// Charging and not yet full: the only state that animates.
+    private var breathing: Bool { onCable && !state.isFullyCharged && !reduceMotion }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            Gauge(value: Double(state.batteryPercent ?? 0), in: 0...100) {
-                Text("Battery")
-            } currentValueLabel: {
-                Image(systemName: "headphones.over.ear")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .gaugeStyle(.accessoryCircularCapacity)
-            .tint(ringColour)
-            .scaleEffect(1.3)
-            .frame(width: 70, height: 70)
+            batteryRing
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(state.deviceName ?? "MOMENTUM 4")
                     .font(.headline)
+                    .padding(.trailing, 34)   // clear of the Refresh button
                 if let battery = state.batteryPercent, state.connected {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        let number = Text("\(battery)").font(.system(size: 26, weight: .semibold, design: .rounded))
-                        let unit = Text("%").font(.callout.weight(.medium)).foregroundStyle(.secondary)
-                        Text("\(number)\(unit)")
-                            .monospacedDigit()
-                        if let charge = state.chargeLabel {
-                            Text(charge)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.green)
-                        }
-                    }
+                    let number = Text("\(battery)").font(.system(size: 26, weight: .semibold, design: .rounded))
+                    let unit = Text("%").font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                    Text("\(number)\(unit)")
+                        .monospacedDigit()
                 } else {
                     Text(state.connected ? "Battery unknown" : "Not connected")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                if state.connected, let codec = state.codecName {
+                if state.connected, state.chargeLabel != nil || state.codecName != nil {
                     HStack(spacing: 6) {
-                        Text(codec)
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(.fill.tertiary, in: .capsule)
-                        if let rate = state.sampleRateLabel {
-                            Text(rate)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        if let charge = state.chargeLabel {
+                            Text("\(Image(systemName: "bolt.fill")) \(charge)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.green)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(.green.opacity(0.18), in: .capsule)
+                        }
+                        if let codec = state.codecName {
+                            HStack(spacing: 6) {
+                                Text(codec)
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .background(.fill.tertiary, in: .capsule)
+                                if let rate = state.sampleRateLabel {
+                                    Text(rate)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .help("What the headphones are playing, from whichever device")
                         }
                     }
-                    .help("What the headphones are playing, from whichever device")
                 }
             }
 
             Spacer(minLength: 0)
-
+        }
+        // An overlay, so the charging pill and codec line can run under it.
+        .overlay(alignment: .topTrailing) {
             if state.connected {
                 Button(action: refresh) {
                     Image(systemName: "arrow.clockwise")
@@ -146,12 +151,78 @@ private struct BatteryHeader: View {
         }
     }
 
-    /// Deliberately not red when low: red reads as a fault, and a low battery
-    /// is a normal state. Orange draws the eye without implying breakage.
+    /// Red at 20% and under, as the iPhone's battery shows it.
     private var ringColour: Color {
         guard state.connected else { return .secondary }
         if state.isCharging == true { return .green }
-        return (state.batteryPercent ?? 100) <= 20 ? .orange : .green
+        return (state.batteryPercent ?? 100) <= 20 ? .red : .green
+    }
+
+    /// The ring, breathing while it charges.
+    ///
+    /// One clock value drives both the bolt and the halo, so they glow in
+    /// step. It is computed per frame rather than animated: a
+    /// `phaseAnimator`'s animation also caught the popover's first layout, and
+    /// the ring flew in from the corner each time the popover opened.
+    @ViewBuilder
+    private var batteryRing: some View {
+        if breathing {
+            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                // 0...1 and back, once every 3 s.
+                ring(glow: (sin(context.date.timeIntervalSinceReferenceDate * .pi / 1.5) + 1) / 2)
+            }
+        } else {
+            ring(glow: onCable ? 0.7 : nil)
+        }
+    }
+
+    /// `glow`: 0 dim ... 1 bright; nil for no glow at all (on battery).
+    private func ring(glow: Double?) -> some View {
+        let bright = glow ?? 0
+        return Group {
+            if state.connected, (state.batteryPercent ?? 0) >= 100 {
+                // At 100% the Gauge still draws its arc's end cap, a notch at
+                // 12 o'clock. A plain circle of the same size has no seam.
+                ZStack {
+                    Circle().strokeBorder(ringColour, lineWidth: FullRing.lineWidth)
+                    ringLabel(bright: bright)
+                }
+                .frame(width: FullRing.diameter, height: FullRing.diameter)
+            } else {
+                Gauge(value: Double(state.batteryPercent ?? 0), in: 0...100) {
+                    Text("Battery")
+                } currentValueLabel: {
+                    ringLabel(bright: bright)
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
+                .tint(ringColour)
+            }
+        }
+        .scaleEffect(1.3)
+        .frame(width: 70, height: 70)
+        .shadow(color: .green.opacity(glow == nil ? 0 : 0.15 + 0.25 * bright), radius: 2 + 3 * bright)
+    }
+
+    @ViewBuilder
+    private func ringLabel(bright: Double) -> some View {
+        if onCable {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.green)
+                .opacity(0.75 + 0.25 * bright)
+                .scaleEffect(0.96 + 0.04 * bright)
+                .shadow(color: .green.opacity(0.4 * bright), radius: 2 * bright)
+        } else {
+            Image(systemName: "headphones.over.ear")
+                .font(.system(size: 14, weight: .medium))
+        }
+    }
+
+    /// The `.accessoryCircularCapacity` Gauge's ring, in points before the
+    /// 1.3x scale; measured from a render on macOS 26.
+    private enum FullRing {
+        static let diameter: CGFloat = 58.5
+        static let lineWidth: CGFloat = 6.2
     }
 }
 
