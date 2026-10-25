@@ -2,6 +2,10 @@
 
 A macOS menu bar app for the Sennheiser MOMENTUM 4.
 
+[![CI](https://github.com/agrmohit/momentum-menu/actions/workflows/ci.yml/badge.svg)](https://github.com/agrmohit/momentum-menu/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/agrmohit/momentum-menu)](https://github.com/agrmohit/momentum-menu/releases/latest)
+[![SLSA Build Level 2](https://slsa.dev/images/gh-badge-level2.svg)](#download)
+
 <!-- One row of three columns, two shots each, paired so the columns end near level. -->
 <table>
   <tr>
@@ -31,6 +35,8 @@ A macOS menu bar app for the Sennheiser MOMENTUM 4.
 ## Download
 
 [Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation and a SHA-256 file. Needs macOS 26 on Apple silicon.
+
+Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
 
 ```sh
 gh attestation verify MomentumMenu-*.dmg -R agrmohit/momentum-menu
