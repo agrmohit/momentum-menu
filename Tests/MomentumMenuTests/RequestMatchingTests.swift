@@ -39,52 +39,54 @@ final class RequestMatchingTests: XCTestCase {
         let expected: [Outcome]
     }
 
-    private static func battery(_ tag: UInt8) -> Call { Call(command: Cmd.getBattery, tag: tag) }
-    private static func noise(_ tag: UInt8) -> Call { Call(command: Cmd.getNoiseLevel, tag: tag) }
+    // Reads that take a one-byte argument, so the tag passes the allow-list.
+    // Tags stay under 16, the highest band index it accepts.
+    private static func frequency(_ tag: UInt8) -> Call { Call(command: Cmd.getBandFrequency, tag: tag) }
+    private static func gain(_ tag: UInt8) -> Call { Call(command: Cmd.getBandGain, tag: tag) }
 
     private static let rows: [Row] = [
         Row(name: "one request",
-            calls: [battery(1)], expected: [.reply([1])]),
+            calls: [frequency(1)], expected: [.reply([1])]),
         Row(name: "two different commands",
-            calls: [battery(1), noise(2)], expected: [.reply([1]), .reply([2])]),
+            calls: [frequency(1), gain(2)], expected: [.reply([1]), .reply([2])]),
         Row(name: "two of the same command",
-            calls: [battery(1), battery(2)], expected: [.reply([1]), .reply([2])]),
+            calls: [frequency(1), frequency(2)], expected: [.reply([1]), .reply([2])]),
         Row(name: "three of the same command",
-            calls: [battery(1), battery(2), battery(3)],
+            calls: [frequency(1), frequency(2), frequency(3)],
             expected: [.reply([1]), .reply([2]), .reply([3])]),
         Row(name: "same command interleaved with another",
-            calls: [battery(1), noise(2), battery(3), noise(4)],
+            calls: [frequency(1), gain(2), frequency(3), gain(4)],
             expected: [.reply([1]), .reply([2]), .reply([3]), .reply([4])]),
         Row(name: "same command, first rejected",
-            calls: [battery(1), battery(2)], rejectTags: [1],
+            calls: [frequency(1), frequency(2)], rejectTags: [1],
             expected: [.rejected, .reply([2])]),
         Row(name: "same command, first unanswered",
-            calls: [battery(1), battery(2)], silentTags: [1],
+            calls: [frequency(1), frequency(2)], silentTags: [1],
             expected: [.timedOut, .reply([2])]),
         Row(name: "a reply to another command is ignored while waiting",
-            calls: [battery(1)], strays: [Reply.ok(Cmd.getNoiseLevel, [9])],
+            calls: [frequency(1)], strays: [Reply.ok(Cmd.getNoiseLevel, [9])],
             expected: [.reply([1])]),
         Row(name: "a rejection of another command is ignored while waiting",
-            calls: [battery(1)], strays: [Reply.rejected(Cmd.getNoiseLevel)],
+            calls: [frequency(1)], strays: [Reply.rejected(Cmd.getNoiseLevel)],
             expected: [.reply([1])]),
         Row(name: "a notification for the same command is not the reply",
-            calls: [battery(1)], strays: [Reply.notification(Cmd.getBattery, [77])],
+            calls: [frequency(1)], strays: [Reply.notification(Cmd.getBandFrequency, [77])],
             expected: [.reply([1])]),
         // The first request's timer fires at 100 ms, while the second still waits.
         Row(name: "a finished request's timer spares the next one",
-            calls: [Call(command: Cmd.getBattery, tag: 1, timeout: .milliseconds(100)),
-                    Call(command: Cmd.getBattery, tag: 2, timeout: .seconds(1))],
+            calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(100)),
+                    Call(command: Cmd.getBandFrequency, tag: 2, timeout: .seconds(1))],
             lateTags: [2: .milliseconds(250)],
             expected: [.reply([1]), .reply([2])]),
         // Regression: the send-failure path resumed the caller a second time.
         Row(name: "a reply during a send that then fails",
-            calls: [battery(1), battery(2)], replyDuringFailedSendTags: [1],
+            calls: [frequency(1), frequency(2)], replyDuringFailedSendTags: [1],
             expected: [.reply([1]), .reply([2])]),
         // Deliberately unsupported: with no request id on the wire, a reply that
         // arrives after its own timeout answers the next same-command caller.
         Row(name: "known limit: a late reply answers the next same-command caller",
-            calls: [Call(command: Cmd.getBattery, tag: 1, timeout: .milliseconds(100)),
-                    Call(command: Cmd.getBattery, tag: 2, timeout: .seconds(1))],
+            calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(100)),
+                    Call(command: Cmd.getBandFrequency, tag: 2, timeout: .seconds(1))],
             lateTags: [1: .milliseconds(150), 2: .milliseconds(400)],
             expected: [.timedOut, .reply([1])]),
     ]
@@ -157,21 +159,21 @@ final class RequestMatchingTests: XCTestCase {
     /// unanswered refresh read, up to 2 s each.
     private static let waitRows: [WaitRow] = [
         WaitRow(name: "nothing silent",
-                calls: [battery(1), noise(2)], silentTags: [], prompt: [1, 2]),
+                calls: [frequency(1), gain(2)], silentTags: [], prompt: [1, 2]),
         WaitRow(name: "another command is not held up by a silent one",
-                calls: [Call(command: Cmd.getBattery, tag: 1, timeout: .milliseconds(500)), noise(2)],
+                calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(500)), gain(2)],
                 silentTags: [1], prompt: [2]),
         WaitRow(name: "two other commands are not held up",
-                calls: [Call(command: Cmd.getBattery, tag: 1, timeout: .milliseconds(500)),
-                        noise(2), Call(command: Cmd.getAncEnabled, tag: 3)],
+                calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(500)),
+                        gain(2), Call(command: Cmd.getAllGains, tag: 3)],
                 silentTags: [1], prompt: [2, 3]),
         // The tag doubles as the ANC value, so it must be 0 or 1 to pass the allow-list.
-        WaitRow(name: "an ANC write is not held up by a silent mode-table read",
-                calls: [Call(command: Cmd.getModeTable, tag: 2, timeout: .milliseconds(500)),
+        WaitRow(name: "an ANC write is not held up by a silent read",
+                calls: [Call(command: Cmd.getAllGains, tag: 2, timeout: .milliseconds(500)),
                         Call(command: Cmd.setAncEnabled, tag: 1)],
                 silentTags: [2], prompt: [1]),
         WaitRow(name: "the same command still waits its turn",
-                calls: [Call(command: Cmd.getBattery, tag: 1, timeout: .milliseconds(300)), battery(2)],
+                calls: [Call(command: Cmd.getBandFrequency, tag: 1, timeout: .milliseconds(300)), frequency(2)],
                 silentTags: [1], prompt: []),
     ]
 
@@ -192,7 +194,11 @@ final class RequestMatchingTests: XCTestCase {
                     return (call.tag, reply != nil, ContinuousClock.now - started)
                 }
             }
-            let finished = await results(of: tasks, within: .seconds(5)) ?? []
+            // A hang must fail the row, not read as "nobody was prompt".
+            guard let finished = await results(of: tasks, within: .seconds(5)) else {
+                XCTFail("\(row.name): did not finish")
+                continue
+            }
             // Answered, and well under the shortest silent timeout. A request
             // refused before sending must not count as prompt.
             let prompt = Set(finished.filter { $0.answered && $0.waited < .milliseconds(150) }.map(\.tag))

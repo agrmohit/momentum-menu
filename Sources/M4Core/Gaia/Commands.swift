@@ -123,8 +123,8 @@ enum Cmd {
 ///
 /// These are not style preferences. Each was observed to do real damage during
 /// the community reverse-engineering work, and three of them cost somebody a
-/// re-pairing or a power cycle to discover. The check is enforced centrally in
-/// GaiaSession.send, so no call site can route around it.
+/// re-pairing or a power cycle to discover. Both `HeadphoneController.request`
+/// and `RFCOMMTransport.send` enforce it, so no call site can route around it.
 enum CommandSafety {
     /// Takes the headphones offline; they drop off the bus and need a power
     /// cycle. Two independent sweeps died here.
@@ -158,10 +158,9 @@ enum CommandSafety {
     /// An allow-list on top of the deny-list above, because community
     /// catalogues name more dangerous ids than any deny-list keeps up with:
     /// factory reset 0x0040, firmware upgrade 0x0200, pairing deletes 0x1405
-    /// and 0x1406, MMI reset 0x1604. Reads may carry one byte, which
-    /// `--diagnose` uses to tell "unsupported" from "wants an argument".
+    /// and 0x1406, MMI reset 0x1604. Reads take exactly the payload the app
+    /// sends: a getter given a byte it does not expect may act as a setter.
     private static let allowed: [UInt16: ([UInt8]) -> Bool] = {
-        let read: ([UInt8]) -> Bool = { $0.count <= 1 }
         let flag: ([UInt8]) -> Bool = { $0 == [0] || $0 == [1] }
         let features: Set<UInt8> = [Cmd.Feature.battery, Cmd.Feature.audio, Cmd.Feature.userEq,
                                     Cmd.Feature.transparency, Cmd.Feature.anc]
@@ -180,17 +179,19 @@ enum CommandSafety {
             Cmd.setAutoAnswer: flag,
             Cmd.setSmartPause: flag,
             Cmd.setComfortCall: flag,
+            // Rejected when empty; the byte is ignored.
+            Cmd.getAllGains: { $0.count == 1 },
+            Cmd.getBandGain: { $0.count == 1 && $0[0] < 16 },
+            Cmd.getBandFrequency: { $0.count == 1 && $0[0] < 16 },
         ]
-        // Strictly empty: this group sits beside ids that act on a device
-        // index, and "an id that answers an indexed payload with an empty OK
-        // is an action" (omarchy-momentum4 PROTOCOL.md).
-        for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall, Cmd.getCodec] {
-            rules[id] = { $0.isEmpty }
-        }
-        for id in [Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable,
-                   Cmd.getEqConfig, Cmd.getBandGain, Cmd.getAllGains, Cmd.getBandFrequency,
+        // Strictly empty. The settings getters sit beside ids that act on a
+        // device index, and "an id that answers an indexed payload with an
+        // empty OK is an action" (omarchy-momentum4 PROTOCOL.md). The battery
+        // read is the one id let out of the 0x06xx power group.
+        for id in [Cmd.getOnHead, Cmd.getAutoAnswer, Cmd.getSmartPause, Cmd.getComfortCall, Cmd.getCodec,
+                   Cmd.getBattery, Cmd.getAncEnabled, Cmd.getNoiseLevel, Cmd.getModeTable, Cmd.getEqConfig,
                    Cmd.getBassBoost, Cmd.getFirmwareVersion, Cmd.getTouchControls, Cmd.getModelId] {
-            rules[id] = read
+            rules[id] = { $0.isEmpty }
         }
         return rules
     }()

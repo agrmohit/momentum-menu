@@ -17,12 +17,24 @@ final class AllowListTests: XCTestCase {
     }
 
     private static let rows: [Row] = [
-        // Reads the app makes, in both payload forms --diagnose uses.
+        // Reads, in exactly the form the app sends. Regression: any read took
+        // one byte, including the battery read inside the 0x06xx power group.
         Row(name: "battery read", command: Cmd.getBattery, payload: [], allowed: true),
-        Row(name: "all gains read with its dummy byte", command: Cmd.getAllGains, payload: [0], allowed: true),
-        Row(name: "band frequency read", command: Cmd.getBandFrequency, payload: [4], allowed: true),
-        Row(name: "touch controls read", command: Cmd.getTouchControls, payload: [], allowed: true),
+        Row(name: "battery read with a byte", command: Cmd.getBattery, payload: [0], allowed: false),
         Row(name: "a read with two bytes", command: Cmd.getBattery, payload: [0, 0], allowed: false),
+        Row(name: "model id read", command: Cmd.getModelId, payload: [], allowed: true),
+        Row(name: "model id read with a byte", command: Cmd.getModelId, payload: [0], allowed: false),
+        Row(name: "touch controls read", command: Cmd.getTouchControls, payload: [], allowed: true),
+        Row(name: "touch controls read with a byte", command: Cmd.getTouchControls, payload: [0], allowed: false),
+        Row(name: "EQ config read", command: Cmd.getEqConfig, payload: [], allowed: true),
+        Row(name: "EQ config read with a byte", command: Cmd.getEqConfig, payload: [0], allowed: false),
+        Row(name: "mode table read with a byte", command: Cmd.getModeTable, payload: [1], allowed: false),
+        Row(name: "all gains read with its dummy byte", command: Cmd.getAllGains, payload: [0], allowed: true),
+        Row(name: "all gains read empty", command: Cmd.getAllGains, payload: [], allowed: false),
+        Row(name: "band frequency read", command: Cmd.getBandFrequency, payload: [4], allowed: true),
+        Row(name: "band frequency read, band 16", command: Cmd.getBandFrequency, payload: [16], allowed: false),
+        Row(name: "band frequency read without a band", command: Cmd.getBandFrequency, payload: [], allowed: false),
+        Row(name: "band gain read, last band", command: Cmd.getBandGain, payload: [15], allowed: true),
         // Writes the app makes, at their limits.
         Row(name: "ANC off", command: Cmd.setAncEnabled, payload: [0], allowed: true),
         Row(name: "ANC on", command: Cmd.setAncEnabled, payload: [1], allowed: true),
