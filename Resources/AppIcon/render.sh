@@ -1,5 +1,5 @@
 #!/bin/bash
-# Renders the icons in artwork.js into G1.icns, Y1c.icns and P3.icns next to
+# Renders the icons in artwork.js into Starfield.icns, Sleepy.icns and Ghost.icns next to
 # this script. Run it after changing artwork.js, and commit the .icns files:
 # the build only copies them, so it needs neither Chrome nor oxipng.
 #
@@ -17,7 +17,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 # id:shape. The bundled icon is full bleed; icons set at runtime are squircles.
-ICONS="G1:fullbleed Y1c:squircle P3:squircle"
+ICONS="Starfield:fullbleed Sleepy:squircle Ghost:squircle"
 
 # iconset file name : pixels : art. Under 64 pt the hand-tuned small art is
 # used, so 32 pt @2x (64 px) is still small art.

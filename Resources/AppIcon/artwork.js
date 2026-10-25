@@ -101,7 +101,7 @@ const PIXEL_STARS = [[200, 210], [820, 240], [170, 800], [850, 830], [760, 170]]
   .map(([x, y], i) => `<rect x="${x}" y="${y}" width="${i % 2 ? 22 : 30}" height="${i % 2 ? 22 : 30}" fill="#b9a8ff" opacity=".55"/>`).join("");
 
 const ICONS = {
-  G1: {
+  Starfield: {
     title: "Starfield",
     background: ["#262b74", "#090a24"],
     defs: muffGradient("g1L", 300, 670, W, "#c9cdf5") + muffGradient("g1R", 724, 670, W, "#c9cdf5") +
@@ -114,7 +114,7 @@ const ICONS = {
     small: () => sparkle(330, 300, 70) + sparkle(724, 260, 46) + band(220, 600, 70, "#c4caff") +
       muff(290, 680, "url(#g1Ls)", SMALL_MUFF) + muff(734, 680, "url(#g1Rs)", SMALL_MUFF),
   },
-  Y1c: {
+  Sleepy: {
     title: "Sleepy",
     background: ["#d6ecff", "#7fb6ff"],
     defs: muffGradient("ycL", 300, 670, W, "#cfe0fb") + muffGradient("ycR", 724, 670, W, "#cfe0fb") +
@@ -125,7 +125,7 @@ const ICONS = {
     small: () => zee(600, 170, 150, "#4a5bd1") + band(220, 600, 70, "#4a5bd1") +
       muff(290, 680, "url(#ycLs)", SMALL_MUFF) + muff(734, 680, "url(#ycRs)", SMALL_MUFF),
   },
-  P3: {
+  Ghost: {
     title: "Ghost",
     background: ["#46298a", "#1a0f36"],
     // Pixel art: a glass sheen would smear the pixels.

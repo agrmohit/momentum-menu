@@ -24,10 +24,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/MomentumMenu"
 
-# G1 is the bundled icon. The others are for Settings > App Icon, which sets
-# them at runtime. Resources/AppIcon/render.sh draws all three.
-cp Resources/AppIcon/G1.icns "$APP/Contents/Resources/AppIcon.icns"
-for alternate in Y1c P3; do
+# Starfield is the bundled icon. The others are for Settings > App Icon, which
+# sets them at runtime. Resources/AppIcon/render.sh draws all three.
+cp Resources/AppIcon/Starfield.icns "$APP/Contents/Resources/AppIcon.icns"
+for alternate in Sleepy Ghost; do
     cp "Resources/AppIcon/$alternate.icns" "$APP/Contents/Resources/AppIcon-$alternate.icns"
 done
 

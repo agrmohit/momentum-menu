@@ -8,9 +8,9 @@ import AppKit
 /// still verifies, though `codesign --strict` objects to the attribute.
 /// Clearing the icon removes both. Resources/AppIcon/render.sh draws the icons.
 enum AppIcon: String, CaseIterable, Identifiable {
-    case starfield = "G1"
-    case sleepy = "Y1c"
-    case ghost = "P3"
+    case starfield
+    case sleepy
+    case ghost
 
     var id: String { rawValue }
 
@@ -25,7 +25,7 @@ enum AppIcon: String, CaseIterable, Identifiable {
     /// The icon as build.sh bundles it; nil when running outside the bundle,
     /// as from Xcode.
     var image: NSImage? {
-        let name = self == .starfield ? "AppIcon" : "AppIcon-\(rawValue)"
+        let name = self == .starfield ? "AppIcon" : "AppIcon-\(title)"
         return Bundle.main.url(forResource: name, withExtension: "icns").flatMap(NSImage.init(contentsOf:))
     }
 
