@@ -288,7 +288,7 @@ private struct DisconnectedPanel: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if state.releasedByUser {
-                Text("Handed over").font(.callout).foregroundStyle(.secondary)
+                Text("Disconnected").font(.callout).foregroundStyle(.secondary)
                 Text("This Mac has let go of the headphones, so another device "
                      + "can use that slot. They'll stay released until you reconnect.")
                     .font(.caption)

@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let charge = state.chargeLabel.map { ", \($0.lowercased())" } ?? ""
             button.toolTip = "MOMENTUM 4 — \(battery)\(charge), \(mode)"
         } else if state.releasedByUser {
-            button.toolTip = "MOMENTUM 4 — handed over to another device"
+            button.toolTip = "MOMENTUM 4 — disconnected from this Mac"
         } else {
             button.toolTip = "MOMENTUM 4 — not connected"
         }
