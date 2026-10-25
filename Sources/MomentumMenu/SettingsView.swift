@@ -1,9 +1,20 @@
+import M4Core
 import SwiftUI
 
 /// The Settings window, laid out as a System Settings pane: a grouped form
 /// whose rows carry a coloured symbol badge.
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
+    @ObservedObject var controller: HeadphoneController
+
+    /// The headphones' devices in their order, then any named earlier that
+    /// are not in the list now, so a choice can still be undone.
+    private var deviceNames: [String] {
+        let paired = (controller.state.pairedDevices ?? []).map(\.name).filter { !$0.isEmpty }
+        let saved = preferences.deviceKinds.keys.filter { !paired.contains($0) }.sorted()
+        var seen = Set<String>()
+        return (paired + saved).filter { seen.insert($0).inserted }
+    }
 
     var body: some View {
         Form {
@@ -49,6 +60,34 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                if deviceNames.isEmpty {
+                    Text("Connect the headphones to list the devices paired with them.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(deviceNames, id: \.self) { name in
+                    let devices = controller.state.pairedDevices
+                    let shown = preferences.displayName(name, among: devices)
+                    Picker(selection: kindBinding(for: name)) {
+                        Text("Automatic (\(DeviceKind.guess(from: shown).title))").tag(DeviceKind?.none)
+                        Divider()
+                        ForEach(DeviceKind.allCases) { kind in
+                            Label(kind.title, systemImage: kind.symbol).tag(DeviceKind?.some(kind))
+                        }
+                    } label: {
+                        Label { Text(shown) } icon: {
+                            Badge(preferences.displayKind(name, among: devices).symbol, .blue)
+                        }
+                    }
+                }
+            } header: {
+                Text("Paired Devices")
+            } footer: {
+                Text("Icons are guessed from each device's name. Choose one where the guess is wrong.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("About") {
                 LabeledContent {
                     Text("Version \(Preferences.displayVersion)")
@@ -68,6 +107,12 @@ struct SettingsView: View {
         .scrollDisabled(true)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Automatic (nil) removes the stored choice.
+    private func kindBinding(for name: String) -> Binding<DeviceKind?> {
+        Binding(get: { preferences.deviceKinds[name] },
+                set: { preferences.deviceKinds[name] = $0 })
     }
 }
 

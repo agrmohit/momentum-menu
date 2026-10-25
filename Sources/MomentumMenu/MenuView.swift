@@ -7,16 +7,28 @@ struct MenuView: View {
     /// Opens the Settings window, which AppDelegate owns.
     let openSettings: () -> Void
     @State private var showBands = false
+    @State private var showDevices = false
 
     private var state: DeviceState { controller.state }
 
     var body: some View {
         VStack(spacing: 10) {
-            BatteryHeader(state: state) {
+            BatteryHeader(state: state, devicesShown: showDevices, refresh: {
                 Task { await controller.refresh() }
-            }
+            }, toggleDevices: {
+                // No animation, as in HeadphoneSettingsRow: the popover
+                // resizes on every frame of one.
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { showDevices.toggle() }
+                if showDevices { Task { await controller.refreshPairedDevices() } }
+            })
 
             if state.connected {
+                if showDevices, let devices = state.pairedDevices {
+                    PairedDevicesList(controller: controller, devices: devices)
+                }
+
                 NoiseControlModule(controller: controller)
 
                 HStack(spacing: 10) {
@@ -35,7 +47,7 @@ struct MenuView: View {
                 }
 
                 if let error = state.lastError {
-                    Text(error)
+                    Text(Preferences.shared.masked(error, among: state.pairedDevices))
                         .font(.caption)
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,10 +92,13 @@ struct MenuView: View {
     }
 }
 
-/// The headphones inside a battery ring, with name, charge and stream.
+/// The headphones inside a battery ring, with name, charge, stream and the
+/// other connected devices.
 private struct BatteryHeader: View {
     let state: DeviceState
+    let devicesShown: Bool
     let refresh: () -> Void
+    let toggleDevices: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var onCable: Bool { state.connected && state.isCharging == true }
@@ -95,7 +110,8 @@ private struct BatteryHeader: View {
             batteryRing
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(state.deviceName ?? "MOMENTUM 4")
+                // The headphones' own name can be personal too.
+                Text(Preferences.shared.demoDeviceNames ? "MOMENTUM 4" : state.deviceName ?? "MOMENTUM 4")
                     .font(.headline)
                     .padding(.trailing, 34)   // clear of the Refresh button
                 if let battery = state.batteryPercent, state.connected {
@@ -136,6 +152,9 @@ private struct BatteryHeader: View {
                         }
                     }
                 }
+                if state.connected, let summary = state.pairedSummary {
+                    devicesLine(Preferences.shared.masked(summary, among: state.pairedDevices))
+                }
             }
 
             Spacer(minLength: 0)
@@ -152,6 +171,27 @@ private struct BatteryHeader: View {
                 .help("Refresh")
             }
         }
+    }
+
+    /// "Also on iPhone", opening the paired-device list below the header.
+    private func devicesLine(_ summary: String) -> some View {
+        Button(action: toggleDevices) {
+            HStack(spacing: 5) {
+                Image(systemName: "laptopcomputer.and.iphone")
+                Text(summary).lineLimit(1).truncationMode(.tail)
+                if state.pairedAction != nil { ProgressView().controlSize(.mini) }
+                Image(systemName: devicesShown ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Devices paired with the headphones")
+        .accessibilityLabel("Paired devices: \(summary)")
+        .accessibilityHint(devicesShown ? "Hides the list" : "Shows the list")
     }
 
     /// Red at 20% and under, as the iPhone's battery shows it.

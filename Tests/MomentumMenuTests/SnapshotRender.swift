@@ -30,11 +30,27 @@ final class SnapshotRender: XCTestCase {
         fake.push(Reply.notification(Cmd.sampleRate, [0, 0, 0xAC, 0x44]))
         try await Task.sleep(for: .milliseconds(300))
 
+        // A second headset with every slot taken, for the list's full state.
+        let full = FakeHeadset()
+        full.paired = [("MacBook Pro", true), ("Name's iPhone", true), ("iPad", false), ("Office PC", false)]
+        full.firmware = [3, 38, 3]
+        let fullFake = FakeTransport()
+        fullFake.respond = { [weak fullFake] in full.respond($0, push: { fullFake?.push($0) }) }
+        let fullController = HeadphoneController(transport: fullFake)
+        await fullController.connect()
+        device.paired = [("MacBook Pro", true), ("Name's iPhone", false), ("iPad", false), ("Office PC", false)]
+        await controller.refreshPairedDevices()
+
         for (appearance, tag) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
             try render(MenuView(controller: controller, openSettings: {}),
                        to: "\(out)/popover-\(tag).png", appearance: appearance)
-            try render(SettingsView(preferences: Preferences.shared),
+            try render(SettingsView(preferences: Preferences.shared, controller: controller),
                        to: "\(out)/settings-\(tag).png", appearance: appearance)
+            for (name, owner) in [("devices", controller), ("devices-full", fullController)] {
+                try render(PairedDevicesList(controller: owner, devices: owner.state.pairedDevices ?? [])
+                    .padding(14).frame(width: 320),
+                           to: "\(out)/\(name)-\(tag).png", appearance: appearance)
+            }
         }
     }
 

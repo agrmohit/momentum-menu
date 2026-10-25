@@ -1,4 +1,5 @@
 import Foundation
+import M4Core
 import ServiceManagement
 
 /// User preferences, backed by UserDefaults.
@@ -10,6 +11,8 @@ final class Preferences: ObservableObject {
         static let hideMenuBarIcon = "hideMenuBarIcon"
         static let showBatteryPercentage = "showBatteryPercentage"
         static let appIcon = "appIcon"
+        static let deviceKinds = "deviceKinds"
+        static let demoDeviceNames = "demoDeviceNames"
     }
 
     private let defaults = UserDefaults.standard
@@ -52,6 +55,48 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// Device types chosen in Settings, by paired-device name: the only
+    /// identity the headphones report. Missing means guess from the name.
+    @Published var deviceKinds: [String: DeviceKind] {
+        didSet { defaults.set(deviceKinds.mapValues(\.rawValue), forKey: Key.deviceKinds) }
+    }
+
+    func kind(of name: String) -> DeviceKind {
+        deviceKinds[name] ?? .guess(from: name)
+    }
+
+    /// Stock names in place of real ones, for screenshots. Set with
+    /// `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` and
+    /// read at launch; no Settings row, so it is not left on by accident.
+    let demoDeviceNames: Bool
+
+    private static let demoNames = ["iPhone", "iPad", "Office PC", "Pixel 9", "ThinkPad", "Galaxy Tab"]
+
+    /// The name to show for a paired device. With demo names on, this Mac
+    /// is "MacBook Pro" and the others take stock names in list order.
+    func displayName(_ name: String, among devices: [PairedDevice]?) -> String {
+        demoDeviceNames ? Self.demoName(for: name, among: devices ?? []) : name
+    }
+
+    static func demoName(for name: String, among devices: [PairedDevice]) -> String {
+        if devices.first(where: { $0.name == name })?.isThisMac == true { return "MacBook Pro" }
+        let others = devices.filter { !$0.isThisMac }.map(\.name)
+        guard let position = others.firstIndex(of: name) else { return "Paired device" }
+        return demoNames[position % demoNames.count]
+    }
+
+    /// The icon to show: in demo mode, the stock name's, so a chosen kind
+    /// cannot hint at the real device.
+    func displayKind(_ name: String, among devices: [PairedDevice]?) -> DeviceKind {
+        demoDeviceNames ? .guess(from: displayName(name, among: devices)) : kind(of: name)
+    }
+
+    /// `text` with every real device name replaced, for errors that quote one.
+    func masked(_ text: String, among devices: [PairedDevice]?) -> String {
+        guard demoDeviceNames else { return text }
+        return (devices ?? []).reduce(text) { $0.replacingOccurrences(of: $1.name, with: displayName($1.name, among: devices)) }
+    }
+
     /// Puts a chosen custom icon back after a reinstall, which replaces the
     /// bundle and the icon with it. The bundled icon needs nothing.
     func reapplyAppIcon() {
@@ -75,6 +120,9 @@ final class Preferences: ObservableObject {
         hideMenuBarIcon = defaults.bool(forKey: Key.hideMenuBarIcon)
         showBatteryPercentage = defaults.bool(forKey: Key.showBatteryPercentage)
         appIcon = defaults.string(forKey: Key.appIcon).flatMap(AppIcon.init(rawValue:)) ?? .starfield
+        let stored = defaults.dictionary(forKey: Key.deviceKinds) as? [String: String] ?? [:]
+        deviceKinds = stored.compactMapValues(DeviceKind.init(rawValue:))
+        demoDeviceNames = defaults.bool(forKey: Key.demoDeviceNames)
     }
 
     private func applyLaunchAtLogin() {
@@ -98,7 +146,6 @@ final class Preferences: ObservableObject {
         }
     }
 
-    /// This fork; upstream is andr3-santos/momentum-menu.
     static let repository = URL(string: "https://github.com/agrmohit/momentum-menu")!
 
     static var shortVersion: String {

@@ -273,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                                   defer: false)
             window.title = "Momentum Menu Settings"
             window.contentViewController = NSHostingController(
-                rootView: SettingsView(preferences: preferences))
+                rootView: SettingsView(preferences: preferences, controller: controller))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
