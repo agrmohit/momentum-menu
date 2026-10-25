@@ -19,7 +19,8 @@ let package = Package(
 
         .testTarget(
             name: "MomentumMenuTests",
-            dependencies: ["M4Core"],
+            // MomentumMenu for the views SnapshotRender draws.
+            dependencies: ["M4Core", "MomentumMenu"],
             path: "Tests/MomentumMenuTests"
         ),
     ]
