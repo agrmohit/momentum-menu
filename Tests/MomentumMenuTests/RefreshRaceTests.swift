@@ -14,12 +14,14 @@ final class RefreshRaceTests: XCTestCase {
         case mode(NoiseMode)
         case level(Int)
         case bass(Bool)
+        case setting(DeviceSetting, Bool)
 
         @MainActor func apply(to controller: HeadphoneController) async {
             switch self {
             case .mode(let mode): await controller.setNoiseMode(mode)
             case .level(let level): await controller.setNoiseLevel(level)
             case .bass(let on): await controller.setBassBoost(on)
+            case .setting(let setting, let on): await controller.set(setting, on: on)
             }
         }
     }
@@ -28,6 +30,7 @@ final class RefreshRaceTests: XCTestCase {
         let mode: NoiseMode?
         let level: Int?
         let bass: Bool?
+        let settings: [DeviceSetting: Bool]
     }
 
     private struct Row {
@@ -73,6 +76,21 @@ final class RefreshRaceTests: XCTestCase {
             startAdaptive: 0, change: .level(80), during: Cmd.getNoiseLevel, phone: { $0.bass = 1 }),
         Row(name: "change already running when the refresh starts", startAnc: 1, startAdaptive: 1,
             change: nil, during: nil, alongside: .mode(.off)),
+        // A change keeps only its own field's reading out: the rest still land.
+        Row(name: "bass on during the level read while the phone changed the level", startAnc: 1,
+            startAdaptive: 0, change: .bass(true), during: Cmd.getNoiseLevel, phone: { $0.level = 70 }),
+        Row(name: "level change during the bass read while the phone turned bass on", startAnc: 1,
+            startAdaptive: 0, change: .level(80), during: Cmd.getBassBoost, phone: { $0.bass = 1 }),
+        Row(name: "Off during the bass read while the phone turned bass on", startAnc: 1, startAdaptive: 1,
+            change: .mode(.off), during: Cmd.getBassBoost, phone: { $0.bass = 1 }),
+        Row(name: "Comfort Calls during the on-head read while the phone turned on-head off", startAnc: 1,
+            startAdaptive: 0, change: .setting(.comfortCalls, true), during: Cmd.getOnHead,
+            phone: { $0.settings[Cmd.getOnHead] = 0 }),
+        Row(name: "on-head off during the on-head read", startAnc: 1, startAdaptive: 0,
+            change: .setting(.onHeadDetection, false), during: Cmd.getOnHead),
+        Row(name: "bass on during a settings read while the phone turned touch off", startAnc: 1,
+            startAdaptive: 0, change: .bass(true), during: Cmd.getTouchControls,
+            phone: { $0.settings[Cmd.getTouchControls] = 1 }),
     ]
 
     func testMenuMatchesTheDeviceAfterARace() async {
@@ -113,8 +131,14 @@ final class RefreshRaceTests: XCTestCase {
             }
 
             let shown = Shown(mode: controller.state.noiseMode, level: controller.state.noiseLevel,
-                              bass: controller.state.bassBoost)
-            let actual = Shown(mode: device.mode, level: Int(device.level), bass: device.bass != 0)
+                              bass: controller.state.bassBoost, settings: controller.state.settings)
+            var settings: [DeviceSetting: Bool] = [:]
+            for setting in DeviceSetting.allCases {
+                guard let raw = device.settings[setting.getter] else { continue }
+                settings[setting] = setting.isInverted ? raw == 0 : raw != 0
+            }
+            let actual = Shown(mode: device.mode, level: Int(device.level), bass: device.bass != 0,
+                               settings: settings)
             XCTAssertEqual(shown, actual, row.name)
         }
     }

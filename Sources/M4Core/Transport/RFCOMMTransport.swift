@@ -68,6 +68,11 @@ final class RFCOMMTransport: NSObject {
     private var openContinuation: CheckedContinuation<IOReturn, Never>?
     private var sdpContinuation: CheckedContinuation<Void, Never>?
     private var lastOpenStatus: IOReturn = kIOReturnError
+    /// Set by `disconnect` and `releaseLink`; a connect still trying channels
+    /// stops at the next one.
+    private var stopped = false
+    /// Numbers each open or SDP wait; see `awaitOpenComplete`.
+    private var waits = 0
     /// Which RFCOMM channel the control session actually ended up on.
     private(set) var openedChannelID: BluetoothRFCOMMChannelID?
 
@@ -119,6 +124,7 @@ final class RFCOMMTransport: NSObject {
             throw TransportError.headphonesNotFound
         }
         device = target
+        stopped = false
 
         if !target.isConnected() {
             guard allowWake else { throw TransportError.notConnected }
@@ -135,6 +141,7 @@ final class RFCOMMTransport: NSObject {
         // headphones moved their GAIA service to a different RFCOMM channel,
         // we would be opening one that no longer exists and waiting forever
         // for a completion that never comes. Ask the device directly and retry.
+        guard !stopped else { throw TransportError.notConnected }
         await refreshServiceRecords(on: target)
         if try await openGaiaChannel(on: target) { return }
 
@@ -143,6 +150,8 @@ final class RFCOMMTransport: NSObject {
 
     /// Re-queries the device's SDP records rather than trusting the cache.
     private func refreshServiceRecords(on device: IOBluetoothDevice) async {
+        waits += 1
+        let wait = waits
         await withCheckedContinuation { continuation in
             sdpContinuation = continuation
             if device.performSDPQuery(self) != kIOReturnSuccess {
@@ -152,7 +161,7 @@ final class RFCOMMTransport: NSObject {
             }
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
-                guard let self, let pending = self.sdpContinuation else { return }
+                guard let self, self.waits == wait, let pending = self.sdpContinuation else { return }
                 self.sdpContinuation = nil
                 pending.resume()
             }
@@ -184,6 +193,9 @@ final class RFCOMMTransport: NSObject {
         guard !candidates.isEmpty else { throw TransportError.gaiaServiceMissing }
 
         for channelID in candidates {
+            // A release or quit while an earlier candidate was opening: stop,
+            // or the next open would bring the link back up.
+            guard !stopped else { throw TransportError.notConnected }
             var opened: IOBluetoothRFCOMMChannel?
             let status = target.openRFCOMMChannelAsync(&opened, withChannelID: channelID, delegate: self)
             guard status == kIOReturnSuccess, let opened else {
@@ -241,11 +253,15 @@ final class RFCOMMTransport: NSObject {
     }
 
     private func awaitOpenComplete(timeoutSeconds: Double) async -> IOReturn {
-        await withCheckedContinuation { continuation in
+        // Timers are never cancelled, so each wait is numbered: an earlier
+        // channel's timer must not end a later channel's wait.
+        waits += 1
+        let wait = waits
+        return await withCheckedContinuation { continuation in
             openContinuation = continuation
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeoutSeconds))
-                guard let self, let pending = self.openContinuation else { return }
+                guard let self, self.waits == wait, let pending = self.openContinuation else { return }
                 self.openContinuation = nil
                 pending.resume(returning: kIOReturnTimeout)
             }
@@ -253,6 +269,7 @@ final class RFCOMMTransport: NSObject {
     }
 
     func disconnect() {
+        stopped = true
         channel?.setDelegate(nil)
         channel?.close()
         channel = nil
@@ -338,6 +355,7 @@ final class RFCOMMTransport: NSObject {
     /// never call: there it would cut the user's audio as a side effect of
     /// tidying up. Here severing the link is the entire point.
     func releaseLink() {
+        stopped = true
         channel?.setDelegate(nil)
         channel?.close()
         channel = nil

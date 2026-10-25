@@ -66,7 +66,10 @@ final class NoiseModeClickTests: XCTestCase {
         let clicks = row.clicks.map { mode in Task { await controller.setNoiseMode(mode) } }
         guard await results(of: clicks, within: .seconds(5)) != nil,
               await results(of: [late].compactMap { $0 }, within: .seconds(5)) != nil else { return nil }
-        precondition(writesBefore == 0, "connecting must not write the mode table")
+        guard writesBefore == 0 else {
+            XCTFail("\(row.name): connecting must not write the mode table")
+            return nil
+        }
         return (controller, device)
     }
 
@@ -97,7 +100,10 @@ final class NoiseModeClickTests: XCTestCase {
         WriteRow(name: "Adaptive alone", clicks: [.adaptive], modeWrites: [[3, 1]]),
         WriteRow(name: "Off alone", clicks: [.off], modeWrites: []),
         WriteRow(name: "Adaptive overtaken by Off", clicks: [.adaptive, .off], modeWrites: []),
-        WriteRow(name: "Adaptive overtaken by Custom", clicks: [.adaptive, .custom], modeWrites: [[3, 0]]),
+        // The device already holds Custom's value, so nothing is written.
+        WriteRow(name: "Adaptive overtaken by Custom", clicks: [.adaptive, .custom], modeWrites: []),
+        WriteRow(name: "Custom while already Custom", clicks: [.custom], modeWrites: []),
+        WriteRow(name: "Off then Custom", clicks: [.off, .custom], modeWrites: []),
         WriteRow(name: "Off overtaken by Adaptive", clicks: [.off, .adaptive], modeWrites: [[3, 1]]),
         WriteRow(name: "Adaptive overtaken by Off, full-table firmware", clicks: [.adaptive, .off],
                  acceptsPair: false, modeWrites: []),
@@ -111,6 +117,105 @@ final class NoiseModeClickTests: XCTestCase {
                 continue
             }
             XCTAssertEqual(device.modeWrites, row.modeWrites, row.name)
+        }
+    }
+
+    private struct LevelRow {
+        let name: String
+        let anc: UInt8
+        let adaptive: UInt8
+        var acceptsPair = true
+        let click: NoiseMode
+        let levelKept: Bool
+    }
+
+    /// Regression: clicking the mode already shown rewrote the adaptive entry,
+    /// and that write reset the user's noise level to 0.
+    private static let levelRows: [LevelRow] = [
+        LevelRow(name: "Custom while Custom", anc: 1, adaptive: 0, click: .custom, levelKept: true),
+        LevelRow(name: "Adaptive while Adaptive", anc: 1, adaptive: 1, click: .adaptive, levelKept: true),
+        LevelRow(name: "Custom from Off, table already Custom", anc: 0, adaptive: 0, click: .custom, levelKept: true),
+        LevelRow(name: "Adaptive from Off, table already Adaptive", anc: 0, adaptive: 1, click: .adaptive,
+                 levelKept: true),
+        LevelRow(name: "Custom while Custom, full-table firmware", anc: 1, adaptive: 0, acceptsPair: false,
+                 click: .custom, levelKept: true),
+        LevelRow(name: "Off", anc: 1, adaptive: 0, click: .off, levelKept: true),
+        // A real change still writes, and the device's reset still shows.
+        LevelRow(name: "Adaptive from Custom", anc: 1, adaptive: 0, click: .adaptive, levelKept: false),
+        LevelRow(name: "Custom from Adaptive", anc: 1, adaptive: 1, click: .custom, levelKept: false),
+        LevelRow(name: "Adaptive from Off, table Custom", anc: 0, adaptive: 0, click: .adaptive, levelKept: false),
+    ]
+
+    /// Connects to a device at level 40 whose mode-table writes reset it to 0,
+    /// then clicks.
+    private func click(_ row: LevelRow) async -> (HeadphoneController, FakeHeadset) {
+        let device = FakeHeadset()
+        device.anc = row.anc
+        device.modeTable = [1, 0, 2, 0, 3, row.adaptive]
+        device.acceptsModePair = row.acceptsPair
+        let fake = FakeTransport()
+        fake.respond = { [weak fake] in device.respond($0, push: { fake?.push($0) }) }
+        let controller = HeadphoneController(transport: fake)
+        await controller.connect()
+        device.levelAfterModeWrite = 0
+        await controller.setNoiseMode(row.click)
+        return (controller, device)
+    }
+
+    func testOnlyARealModeChangeResetsTheLevel() async {
+        for row in Self.levelRows {
+            let (_, device) = await click(row)
+            XCTAssertEqual(device.level == 40, row.levelKept, "\(row.name): device level \(device.level)")
+        }
+    }
+
+    func testTheShownLevelMatchesTheDevice() async {
+        for row in Self.levelRows {
+            let (controller, device) = await click(row)
+            XCTAssertEqual(controller.state.noiseLevel, Int(device.level), row.name)
+        }
+    }
+
+    private struct AwayRow {
+        let name: String
+        /// The adaptive entry the phone leaves while this Mac is away.
+        let phoneAdaptive: UInt8?
+        let click: NoiseMode
+    }
+
+    /// What this Mac knew of the mode table is dropped with the link: the phone
+    /// may change it meanwhile, and a stale "already Custom" would skip the
+    /// write the click needs. The reconnect's ANC read fails here, so the
+    /// refresh skips the mode table and nothing replaces the old value.
+    private static let awayRows: [AwayRow] = [
+        AwayRow(name: "phone set Adaptive, click Custom", phoneAdaptive: 1, click: .custom),
+        AwayRow(name: "phone set Custom, click Adaptive", phoneAdaptive: 0, click: .adaptive),
+        AwayRow(name: "phone changed nothing, click Custom", phoneAdaptive: nil, click: .custom),
+        AwayRow(name: "phone changed nothing, click Adaptive", phoneAdaptive: nil, click: .adaptive),
+    ]
+
+    func testAModeChangedWhileAwayStillLands() async {
+        for row in Self.awayRows {
+            let device = FakeHeadset()   // Custom
+            let fake = FakeTransport()
+            fake.respond = { [weak fake] in device.respond($0, push: { fake?.push($0) }) }
+            let controller = HeadphoneController(transport: fake)
+            await controller.connect()
+            fake.drop()
+            if let adaptive = row.phoneAdaptive { device.modeTable[5] = adaptive }
+            device.rejects = [Cmd.getAncEnabled]
+            await controller.connect()
+            await controller.setNoiseMode(row.click)
+            XCTAssertEqual(device.mode, row.click, row.name)
+        }
+    }
+
+    /// The pair of the two above: a skipped write must not skip the mode.
+    func testTheClickedModeLands() async {
+        for row in Self.levelRows {
+            let (controller, device) = await click(row)
+            XCTAssertTrue(device.mode == row.click && controller.state.noiseMode == row.click,
+                          "\(row.name): device \(device.mode), menu \(String(describing: controller.state.noiseMode))")
         }
     }
 }

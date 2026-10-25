@@ -282,11 +282,26 @@ public final class HeadphoneController: ObservableObject {
     private var presetsBeingApplied = 0
     /// User changes to noise mode, level or bass that have finished.
     ///
-    /// `refresh()` keeps a reading only if none finished since its read went
-    /// out. Otherwise the device may have answered before the user's write
-    /// landed, and the stale answer would overwrite the user's choice. A change
-    /// that finishes later sets its own state last, so it wins without help.
-    private var userChangesFinished = 0
+    /// User changes finished so far, per field they can change.
+    ///
+    /// `refresh()` keeps a reading only if no change to that field finished
+    /// since its read went out. Otherwise the device may have answered before
+    /// the user's write landed, and the stale answer would overwrite the
+    /// user's choice. A change that finishes later sets its own state last, so
+    /// it wins without help. Other fields' readings are kept.
+    private var changesFinished: [Field: Int] = [:]
+
+    private enum Field: Hashable {
+        /// The noise mode and anti-wind: both come from the mode table.
+        case noiseMode
+        case noiseLevel
+        case bassBoost
+        case setting(DeviceSetting)
+    }
+
+    private func finished(_ fields: Field...) {
+        for field in fields { changesFinished[field, default: 0] += 1 }
+    }
     /// Noise-mode clicks so far. Each click keeps its number to tell whether a
     /// newer one has started since.
     private var noiseModeClicks = 0
@@ -314,11 +329,21 @@ public final class HeadphoneController: ObservableObject {
         transport.onDisconnect = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.links += 1
                 self.failAllPending(TransportError.notConnected)
                 self.markDisconnected()
             }
         }
     }
+
+    /// Bumped whenever the link ends: a release, a quit or a drop. A connect
+    /// that sees it change across an await has been overtaken and stops.
+    private var links = 0
+
+    /// The device's adaptive mode-table entry (1 Adaptive, 0 Custom) as last
+    /// read, pushed or written; nil when unknown. The ANC flag says only on or
+    /// off, so this is what tells Adaptive from Custom when ANC comes on.
+    private var knownAdaptive: UInt8?
 
     // MARK: - Connection
 
@@ -336,36 +361,49 @@ public final class HeadphoneController: ObservableObject {
         guard !state.connected, !state.isConnecting else { return }
         state.isConnecting = true
         defer { state.isConnecting = false }
+        let link = links
 
         do {
             // Only a deliberate action may wake the headphones onto this Mac.
             // This now returns once the channel has actually opened, rather
             // than once the request was accepted.
             try await transport.connect(allowWake: userInitiated)
-            state.connected = transport.isOpen
+            guard link == links else { return abandon() }
+            guard transport.isOpen else { return }
             state.deviceName = transport.deviceName
             state.lastError = nil
-            if state.connected {
-                // Subscribing below is the first write. Other Sennheiser models
-                // share the GAIA service but not this command map.
-                guard await isMomentum4() else {
-                    transport.disconnect()
-                    state.connected = false
-                    state.lastError = "These headphones are not a MOMENTUM 4, so the app leaves them alone."
-                    return
-                }
-                await registerForNotifications()
-                await refresh()
+            // Subscribing below is the first write. Other Sennheiser models
+            // share the GAIA service but not this command map. Not connected
+            // until then: the popover shows its controls once connected.
+            let isMomentum4 = await isMomentum4()
+            guard link == links else { return abandon() }
+            guard isMomentum4 else {
+                transport.disconnect()
+                state.lastError = "These headphones are not a MOMENTUM 4, so the app leaves them alone."
+                return
             }
+            state.connected = true
+            await registerForNotifications()
+            await refresh()
         } catch {
+            guard link == links else { return abandon() }
             state.connected = false
             state.lastError = error.localizedDescription
         }
     }
 
+    /// Ends a connect the user or the link overtook. The transport may have
+    /// opened a channel anyway, so close it again; a release lets go of the
+    /// whole link once more.
+    private func abandon() {
+        if state.releasedByUser { transport.releaseLink() } else { transport.disconnect() }
+        state.connected = false
+    }
+
     /// Closes the control channel only. The headphones stay connected to this
     /// Mac and audio is unaffected. Used when the app quits.
     public func disconnect() {
+        links += 1
         // The transport closes without its disconnect callback, so nothing
         // else would release a caller still waiting on a reply.
         failAllPending(TransportError.notConnected)
@@ -382,6 +420,8 @@ public final class HeadphoneController: ObservableObject {
         state.isCharging = nil
         state.codec = nil
         state.sampleRateHz = nil
+        // The phone may change the mode while this Mac is away.
+        knownAdaptive = nil
     }
 
     /// Hands the headphones over: drops the Mac's Bluetooth link entirely so
@@ -391,6 +431,7 @@ public final class HeadphoneController: ObservableObject {
     /// it was just asked to give up would defeat the purpose. Use
     /// `connect(userInitiated: true)` to take it back.
     public func releaseHeadphones() {
+        links += 1
         failAllPending(TransportError.notConnected)
         transport.releaseLink()
         markDisconnected()
@@ -444,18 +485,19 @@ public final class HeadphoneController: ObservableObject {
         state.batteryPercent = (try? await request(Cmd.getBattery).first).map { Int($0) }
         if let codec = try? await request(Cmd.getCodec).first { state.codec = codec }
 
-        var mark = userChangesFinished
+        var mark = changesFinished[.noiseMode]
         if let anc = try? await request(Cmd.getAncEnabled).first {
             let table = try? await request(Cmd.getModeTable)
             let adaptive = table.flatMap { Self.modeValue(in: $0, id: Cmd.modeAdaptive) } == 1
-            if userChangesFinished == mark {
+            if changesFinished[.noiseMode] == mark {
+                knownAdaptive = table.flatMap { Self.modeValue(in: $0, id: Cmd.modeAdaptive) }
                 state.noiseMode = anc != 0 ? (adaptive ? .adaptive : .custom) : .off
                 state.antiWind = table.flatMap(Self.antiWind(in:))
             }
         }
-        mark = userChangesFinished
+        mark = changesFinished[.noiseLevel]
         let level = (try? await request(Cmd.getNoiseLevel).first).map { Int($0) }
-        if userChangesFinished == mark { state.noiseLevel = level }
+        if changesFinished[.noiseLevel] == mark { state.noiseLevel = level }
 
         if let version = try? await request(Cmd.getFirmwareVersion), version.count >= 6 {
             let parts = stride(from: 0, to: 6, by: 2).map { Int(version[$0]) << 8 | Int(version[$0 + 1]) }
@@ -467,9 +509,9 @@ public final class HeadphoneController: ObservableObject {
 
         // Bass boost arrived with firmware 3.x and is rejected outright on 2.x,
         // so a failure here means "not on this firmware", not "broken".
-        mark = userChangesFinished
+        mark = changesFinished[.bassBoost]
         let bass = (try? await request(Cmd.getBassBoost).first).map { $0 != 0 }
-        if userChangesFinished == mark { state.bassBoost = bass }
+        if changesFinished[.bassBoost] == mark { state.bassBoost = bass }
 
         await refreshSettings()
 
@@ -480,9 +522,9 @@ public final class HeadphoneController: ObservableObject {
     public func refreshSettings() async {
         guard state.connected else { return }
         for setting in DeviceSetting.allCases {
-            let mark = userChangesFinished
+            let mark = changesFinished[.setting(setting)]
             let raw = try? await request(setting.getter).first
-            guard userChangesFinished == mark else { continue }
+            guard changesFinished[.setting(setting)] == mark else { continue }
             state.settings[setting] = raw.map { setting.isInverted ? $0 == 0 : $0 != 0 }
         }
     }
@@ -544,7 +586,8 @@ public final class HeadphoneController: ObservableObject {
     /// A mode is two writes. When a newer click arrives in between, this one
     /// stops: its second write, or its state update, would undo the newer one.
     public func setNoiseMode(_ mode: NoiseMode) async {
-        defer { userChangesFinished += 1 }
+        // A mode-table write can reset the level too (see rereadNoiseLevel).
+        defer { finished(.noiseMode, .noiseLevel) }
         noiseModeClicks += 1
         let click = noiseModeClicks
         do {
@@ -563,7 +606,7 @@ public final class HeadphoneController: ObservableObject {
     }
 
     public func setAntiWind(_ setting: AntiWind) async {
-        defer { userChangesFinished += 1 }
+        defer { finished(.noiseMode, .noiseLevel) }
         do {
             try await writeMode(id: Cmd.modeAntiWind, value: setting.rawValue)
             state.antiWind = setting
@@ -575,7 +618,7 @@ public final class HeadphoneController: ObservableObject {
 
     public func setNoiseLevel(_ level: Int) async {
         let clamped = UInt8(max(0, min(100, level)))
-        defer { userChangesFinished += 1 }
+        defer { finished(.noiseLevel) }
         do {
             _ = try await request(Cmd.setNoiseLevel, payload: [clamped])
             state.noiseLevel = Int(clamped)
@@ -655,7 +698,7 @@ public final class HeadphoneController: ObservableObject {
     }
 
     public func set(_ setting: DeviceSetting, on: Bool) async {
-        defer { userChangesFinished += 1 }
+        defer { finished(.setting(setting)) }
         let raw: UInt8 = on != setting.isInverted ? 1 : 0
         do {
             _ = try await request(setting.setter, payload: [raw])
@@ -667,7 +710,7 @@ public final class HeadphoneController: ObservableObject {
     }
 
     public func setBassBoost(_ enabled: Bool) async {
-        defer { userChangesFinished += 1 }
+        defer { finished(.bassBoost) }
         do {
             _ = try await request(Cmd.setBassBoost, payload: [enabled ? 1 : 0])
             state.bassBoost = enabled
@@ -695,9 +738,12 @@ public final class HeadphoneController: ObservableObject {
     /// read-modify-write and remember that for the rest of the session. Every
     /// other entry is only ever written as the whole table.
     private func patchModeTable(id: UInt8, value: UInt8) async throws {
+        // Every write has a side effect (see rereadNoiseLevel), so skip a no-op.
+        if id == Cmd.modeAdaptive, knownAdaptive == value { return }
         if id == Cmd.modeAdaptive, modeWriteFormat != .fullTable {
             do {
                 _ = try await request(Cmd.setModeTable, payload: [id, value])
+                knownAdaptive = value
                 modeWriteFormat = .singlePair
                 await rereadNoiseLevel()
                 return
@@ -713,7 +759,7 @@ public final class HeadphoneController: ObservableObject {
         guard Cmd.isFullModeTable(table) else {
             throw TransportError.unexpectedReply(command: Cmd.getModeTable)
         }
-        // Every write has a side effect (see rereadNoiseLevel), so skip a no-op.
+        knownAdaptive = Self.modeValue(in: table, id: Cmd.modeAdaptive)
         guard Self.modeValue(in: table, id: id) != value else { return }
         var index = 0
         while index + 1 < table.count {
@@ -721,15 +767,16 @@ public final class HeadphoneController: ObservableObject {
             index += 2
         }
         _ = try await request(Cmd.setModeTable, payload: table)
+        knownAdaptive = Self.modeValue(in: table, id: Cmd.modeAdaptive)
         await rereadNoiseLevel()
     }
 
     /// Any mode-table write, even an unchanged one, set the level to 0 on
     /// FW 3.37.3 (M4C captures). Reads it back so the slider shows the truth.
     private func rereadNoiseLevel() async {
-        let mark = userChangesFinished
+        let mark = changesFinished[.noiseLevel]
         let level = try? await request(Cmd.getNoiseLevel).first
-        if let level, userChangesFinished == mark { state.noiseLevel = Int(level) }
+        if let level, changesFinished[.noiseLevel] == mark { state.noiseLevel = Int(level) }
     }
 
     /// Nil unless the table has the one shape seen on the wire and a known value.
@@ -840,12 +887,18 @@ public final class HeadphoneController: ObservableObject {
         case Cmd.getNoiseLevel:
             if let value = frame.payload.first { state.noiseLevel = Int(value) }
         case Cmd.getAncEnabled:
-            if let value = frame.payload.first, value == 0 { state.noiseMode = .off }
-        case Cmd.getModeTable:
-            // Arrives alongside the ANC push, so the pair settles the mode.
-            if state.noiseMode != .off,
-               let adaptive = Self.modeValue(in: frame.payload, id: Cmd.modeAdaptive) {
+            // Arrives alongside the mode-table push, in either order, so each
+            // settles the mode from what the other last said.
+            guard let value = frame.payload.first else { break }
+            if value == 0 {
+                state.noiseMode = .off
+            } else if state.noiseMode == .off || state.noiseMode == nil, let adaptive = knownAdaptive {
                 state.noiseMode = adaptive == 1 ? .adaptive : .custom
+            }
+        case Cmd.getModeTable:
+            if let adaptive = Self.modeValue(in: frame.payload, id: Cmd.modeAdaptive) {
+                knownAdaptive = adaptive
+                if state.noiseMode != .off { state.noiseMode = adaptive == 1 ? .adaptive : .custom }
             }
             if let antiWind = Self.antiWind(in: frame.payload) { state.antiWind = antiWind }
         case Cmd.getBandGain:
@@ -895,7 +948,8 @@ public final class HeadphoneController: ObservableObject {
     /// Several getters on this device reject an empty payload with 0x05 and
     /// answer the same id happily when given one dummy byte. The error form is
     /// indistinguishable from "unsupported", so the only way to tell them
-    /// apart is to ask twice. Sends no writes.
+    /// apart is to ask twice. Sends no writes. A form the allow-list refuses
+    /// is reported as refused and never sent.
     public func diagnose() async -> String {
         let probes: [(UInt16, String)] = [
             (Cmd.getEqConfig, "0x1000 EQ config"),
