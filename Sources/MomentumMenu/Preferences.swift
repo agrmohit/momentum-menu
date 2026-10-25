@@ -9,6 +9,7 @@ final class Preferences: ObservableObject {
     private enum Key {
         static let hideMenuBarIcon = "hideMenuBarIcon"
         static let showBatteryPercentage = "showBatteryPercentage"
+        static let appIcon = "appIcon"
     }
 
     private let defaults = UserDefaults.standard
@@ -41,6 +42,31 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// Why the app icon could not be changed, if it could not.
+    @Published var appIconError: String?
+
+    @Published var appIcon: AppIcon {
+        didSet {
+            defaults.set(appIcon.rawValue, forKey: Key.appIcon)
+            applyAppIcon()
+        }
+    }
+
+    /// Puts a chosen custom icon back after a reinstall, which replaces the
+    /// bundle and the icon with it. The bundled icon needs nothing.
+    func reapplyAppIcon() {
+        if appIcon != .starfield { applyAppIcon() }
+    }
+
+    private func applyAppIcon() {
+        do {
+            try appIcon.apply()
+            appIconError = nil
+        } catch {
+            appIconError = error.localizedDescription
+        }
+    }
+
     private init() {
         // The login item is the system's state, not ours: it can be revoked in
         // System Settings > General > Login Items without telling us. Read it
@@ -48,6 +74,7 @@ final class Preferences: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         hideMenuBarIcon = defaults.bool(forKey: Key.hideMenuBarIcon)
         showBatteryPercentage = defaults.bool(forKey: Key.showBatteryPercentage)
+        appIcon = defaults.string(forKey: Key.appIcon).flatMap(AppIcon.init(rawValue:)) ?? .starfield
     }
 
     private func applyLaunchAtLogin() {

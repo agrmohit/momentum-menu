@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.statusItem.isVisible = visible
         }
         statusItem.isVisible = !preferences.hideMenuBarIcon
+        preferences.reapplyAppIcon()
         preferences.onBatteryPercentageVisibilityChanged = { [weak self] in
             guard let self else { return }
             self.updateStatusItem(self.controller.state)

@@ -24,6 +24,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/MomentumMenu"
 
+# G1 is the bundled icon. The others are for Settings > App Icon, which sets
+# them at runtime. Resources/AppIcon/render.sh draws all three.
+cp Resources/AppIcon/G1.icns "$APP/Contents/Resources/AppIcon.icns"
+for alternate in Y1c P3; do
+    cp "Resources/AppIcon/$alternate.icns" "$APP/Contents/Resources/AppIcon-$alternate.icns"
+done
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,6 +45,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key>       <string>1.0.2</string>
     <key>CFBundleExecutable</key>               <string>MomentumMenu</string>
     <key>CFBundlePackageType</key>              <string>APPL</string>
+    <key>CFBundleIconFile</key>                 <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>           <string>26.0</string>
 
     <!-- Menu bar only: no Dock icon, no main window. -->

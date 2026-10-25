@@ -28,6 +28,25 @@ struct SettingsView: View {
                         }
                     } icon: { Badge("menubar.rectangle", .blue) }
                 }
+                LabeledContent {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(AppIcon.allCases) { icon in
+                            IconChoice(icon: icon, isSelected: preferences.appIcon == icon) {
+                                preferences.appIcon = icon
+                            }
+                        }
+                    }
+                } label: {
+                    Label {
+                        Text("App Icon")
+                        Text("Shown in Finder, Spotlight and Login Items.")
+                    } icon: { Badge("app.badge", .purple) }
+                }
+                if let error = preferences.appIconError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("About") {
@@ -49,6 +68,64 @@ struct SettingsView: View {
         .scrollDisabled(true)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// One icon to pick, as System Settings > Appearance shows its icon styles:
+/// the icon, a ring when chosen, and its name underneath.
+private struct IconChoice: View {
+    let icon: AppIcon
+    let isSelected: Bool
+    let choose: () -> Void
+
+    /// The canvas the icon is drawn on. The visible squircle is 824/1024 of
+    /// it, as on Apple's icon grid, and its corner radius 185/824 of that.
+    private let canvas: CGFloat = 60
+    private var tile: CGFloat { canvas * 824 / 1024 }
+    private var corner: CGFloat { tile * 185 / 824 }
+
+    var body: some View {
+        Button(action: choose) {
+            VStack(spacing: 4) {
+                artwork
+                    .frame(width: canvas, height: canvas)
+                    .overlay {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: corner + 4, style: .continuous)
+                                .strokeBorder(Color.accentColor, lineWidth: 3)
+                                .frame(width: tile + 9, height: tile + 9)
+                        }
+                    }
+                Text(icon.title)
+                    .font(.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(icon.title) icon")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        let squircle = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        if let image = icon.image {
+            if icon == .starfield {
+                // The bundled icon is a full-bleed square that macOS rounds
+                // itself; the others carry their own squircle.
+                Image(nsImage: image)
+                    .resizable()
+                    .frame(width: tile, height: tile)
+                    .clipShape(squircle)
+            } else {
+                Image(nsImage: image).resizable()
+            }
+        } else {
+            // Run outside the bundle, as from Xcode: no icons to show.
+            squircle.fill(.quaternary).frame(width: tile, height: tile)
+        }
     }
 }
 

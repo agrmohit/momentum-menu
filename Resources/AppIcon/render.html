@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Draws one icon at px x px in the centre of the window, for headless Chrome
+     to screenshot and render.sh to crop out (sips crops around the centre).
+     render.html?id=G1&art=large&shape=fullbleed&px=128
+     The window stays 1024 wide: headless Chrome screenshots some small
+     windows (100-140 px) blank. -->
+<html><head><meta charset="utf-8">
+<style>html, body { margin: 0; background: transparent; overflow: hidden; } svg { display: block; }</style>
+<script src="artwork.js"></script>
+</head><body>
+<script>
+  const query = new URLSearchParams(location.search);
+  const px = query.get("px");
+  const inset = (1024 - px) / 2;
+  document.body.innerHTML = `<div style="position:absolute;left:${inset}px;top:${inset}px;width:${px}px;height:${px}px">${iconSVG(query.get("id"), query.get("art"), query.get("shape"))}</div>`;
+</script>
+</body></html>
