@@ -10,7 +10,9 @@
 </head><body>
 <script>
   const query = new URLSearchParams(location.search);
-  const px = query.get("px");
+  // Number() rejects trailing junk that parseInt would drop.
+  const px = Number(query.get("px"));
+  if (!Number.isInteger(px) || px < 1 || px > 1024) throw new Error(`px must be 1...1024: ${query.get("px")}`);
   const inset = (1024 - px) / 2;
   document.body.innerHTML = `<div style="position:absolute;left:${inset}px;top:${inset}px;width:${px}px;height:${px}px">${iconSVG(query.get("id"), query.get("art"), query.get("shape"))}</div>`;
 </script>

@@ -137,6 +137,11 @@ const ICONS = {
 
 /// The whole icon as one standalone SVG document.
 function iconSVG(id, art, shape) {
+  // The arguments come from render.html's URL: only known names may pick
+  // which art function runs.
+  if (!Object.hasOwn(ICONS, id)) throw new Error(`unknown icon id: ${id}`);
+  if (art !== "large" && art !== "small") throw new Error(`unknown art: ${art}`);
+  if (shape !== "fullbleed" && shape !== "squircle") throw new Error(`unknown shape: ${shape}`);
   const icon = ICONS[id];
   // The squircle body spans 100...924. Full bleed scales it up to fill the
   // canvas, so macOS's own squircle clip lands where ours would have.
