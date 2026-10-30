@@ -2,7 +2,8 @@
 
 A macOS menu bar app for the Sennheiser MOMENTUM 4.
 
-[![CI](https://github.com/agrmohit/momentum-menu/actions/workflows/ci.yml/badge.svg)](https://github.com/agrmohit/momentum-menu/actions/workflows/ci.yml)
+[![AI Assisted](https://www.aihonestybadge.com/badges/ai-assisted-small.svg)](https://www.aihonestybadge.com)
+[![License](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/agrmohit/momentum-menu)](https://github.com/agrmohit/momentum-menu/releases/latest)
 [![SLSA Build Level 2](https://slsa.dev/images/gh-badge-level2.svg)](#download)
 
