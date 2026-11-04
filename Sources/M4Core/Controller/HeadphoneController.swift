@@ -96,6 +96,7 @@ public enum DeviceSetting: CaseIterable, Sendable {
 enum AudioCodec {
     static let names = ["SBC", "AAC", "aptX", "aptX LL", "MP3", "aptX HD",
                         "FastStream", "LHDC", "aptX Adaptive", "aptX Lossless", "LC3"]
+    static let mSBC: UInt8 = 0xF0
     static let none: UInt8 = 0xFF
 }
 
@@ -249,6 +250,7 @@ public struct DeviceState: Sendable {
     /// "AAC", or nil when nothing is playing or the codec is unknown.
     public var codecName: String? {
         guard let codec, codec != AudioCodec.none else { return nil }
+        if codec == AudioCodec.mSBC { return "mSBC" }
         return Int(codec) < AudioCodec.names.count ? AudioCodec.names[Int(codec)] : "Codec \(codec)"
     }
 
