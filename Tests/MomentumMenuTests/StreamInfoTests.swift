@@ -27,6 +27,8 @@ final class StreamInfoTests: XCTestCase {
         LabelRow(name: "rate not pushed yet", codec: 2, rate: nil, label: "aptX"),
         LabelRow(name: "stream stopped", codec: 1, rate: 0, label: "AAC"),
         LabelRow(name: "a value outside the enum", codec: 11, rate: 44100, label: "Codec 11 · 44.1 kHz"),
+        LabelRow(name: "mSBC call", codec: 0xF0, rate: 16000, label: "mSBC · 16 kHz"),
+        LabelRow(name: "next to mSBC, still unknown", codec: 0xF1, rate: 8000, label: "Codec 241 · 8 kHz"),
         LabelRow(name: "nothing playing", codec: 0xFF, rate: 44100, label: nil),
         LabelRow(name: "codec unknown", codec: nil, rate: 44100, label: nil),
         LabelRow(name: "nothing known", codec: nil, rate: nil, label: nil),
