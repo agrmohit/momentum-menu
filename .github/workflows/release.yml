@@ -45,18 +45,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build the DMG and its checksum
+      - name: Build the DMG, its checksum and the dSYM zip
         run: make dmg
 
       # Before the release exists, so no release is ever public unattested.
       - name: Attest build provenance
         uses: actions/attest@v4
         with:
-          subject-path: build/MomentumMenu-*.dmg
+          subject-path: |
+            build/MomentumMenu-*.dmg
+            build/MomentumMenu-*.dSYM.zip
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" build/MomentumMenu-*.dmg build/MomentumMenu-*.dmg.sha256 \
+            build/MomentumMenu-*.dSYM.zip \
             --verify-tag --title "$GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"
