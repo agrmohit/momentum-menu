@@ -15,6 +15,7 @@ SHELL := bash
 # build.sh is the one place the version lives.
 VERSION := $(shell sed -n 's:.*<key>CFBundleShortVersionString</key>.*<string>\(.*\)</string>.*:\1:p' build.sh)
 DMG := build/MomentumMenu-$(VERSION).dmg
+DSYM_ZIP := build/MomentumMenu-$(VERSION).dSYM.zip
 
 .DEFAULT_GOAL := help
 .PHONY: help all test check build install dmg release-check snapshots icons clean
@@ -48,16 +49,18 @@ install: ## Build and install to ~/Applications
 
 # The app sits beside an Applications link to drag it onto. ULMO (LZMA) is
 # about a quarter smaller than UDZO; macOS 14 and later mount it. The bundle
-# is removed after: two copies with one id confuse Launch Services.
-dmg: build ## Pack the app into build/MomentumMenu-<version>.dmg with a .sha256
-	rm -rf build/dmg "$(DMG)" "$(DMG).sha256"
+# is removed after: two copies with one id confuse Launch Services. The dSYM
+# zip ships beside the DMG; a later rebuild may not match its UUID.
+dmg: build ## Pack the app into build/MomentumMenu-<version>.dmg with a .sha256 and dSYM zip
+	rm -rf build/dmg "$(DMG)" "$(DMG).sha256" "$(DSYM_ZIP)"
+	ditto -c -k --keepParent build/MomentumMenu.dSYM "$(DSYM_ZIP)"
 	mkdir -p build/dmg
 	cp -R build/MomentumMenu.app build/dmg/
 	ln -s /Applications build/dmg/Applications
 	hdiutil create -volname "Momentum Menu" -srcfolder build/dmg -format ULMO -ov "$(DMG)"
 	cd build && shasum -a 256 "$(notdir $(DMG))" > "$(notdir $(DMG)).sha256"
 	rm -rf build/dmg build/MomentumMenu.app
-	@echo "Packed $(DMG)"
+	@echo "Packed $(DMG) and $(DSYM_ZIP)"
 
 # A tag on a commit whose build.sh says another version would ship an app
 # reporting the wrong version.

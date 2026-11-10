@@ -22,7 +22,43 @@ BIN=".build/$CONFIG/MomentumMenu"
 echo "==> Assembling bundle"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/MomentumMenu"
+EXE="$APP/Contents/MacOS/MomentumMenu"
+cp "$BIN" "$EXE"
+
+# SwiftPM leaves a release binary unstripped: about 1 MB of symbols and a
+# debug map naming this machine's object files. As Xcode does for an app,
+# link the debug info into a dSYM for crash reports, then strip. dsymutil
+# runs here rather than trusting SwiftPM to, which varies by toolchain.
+# Debug builds keep their symbols for the debugger.
+DSYM="build/MomentumMenu.dSYM"
+rm -rf "$DSYM"
+if [ "$CONFIG" = "release" ]; then
+    echo "==> Writing the dSYM, stripping the binary"
+    # A missing object file is only a warning, and leaves a dSYM with the
+    # right UUID but holes in it. A clean run prints nothing.
+    dsym_log=$(dsymutil "$BIN" -o "$DSYM" 2>&1)
+    if [ -n "$dsym_log" ]; then
+        echo "$dsym_log"
+        echo "build failed: dsymutil reported problems"
+        exit 1
+    fi
+    strip "$EXE"
+
+    # A dSYM symbolicates only the build whose UUID it carries.
+    exe_uuid=$(dwarfdump --uuid "$EXE" | awk '{ print $2 }')
+    dsym_uuid=$(dwarfdump --uuid "$DSYM" | awk '{ print $2 }')
+    if [ -z "$exe_uuid" ] || [ "$exe_uuid" != "$dsym_uuid" ]; then
+        echo "build failed: dSYM UUID '$dsym_uuid' does not match binary '$exe_uuid'"
+        exit 1
+    fi
+    # Captured first: piped into `grep -q`, nm dies of SIGPIPE on a match and
+    # pipefail turns that match into a pass.
+    symbols=$(nm -a "$EXE")
+    if grep -qE ' OSO | t ' <<<"$symbols"; then
+        echo "build failed: $EXE still has local symbols or a debug map"
+        exit 1
+    fi
+fi
 
 # Starfield is the bundled icon. The others are for Settings > App Icon, which
 # sets them at runtime. Resources/AppIcon/render.sh draws all three.
