@@ -35,7 +35,7 @@ A macOS menu bar app for the Sennheiser MOMENTUM 4.
 
 ## Download
 
-[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation and a SHA-256 file. Needs macOS 26 on Apple silicon.
+[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation, a SHA-256 file and a dSYM zip for [crash reports](#crash-reports). Needs macOS 26 on Apple silicon.
 
 Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
 
@@ -44,6 +44,36 @@ gh attestation verify MomentumMenu-*.dmg -R agrmohit/momentum-menu
 ```
 
 The app is ad hoc signed, not notarised, so macOS blocks its first launch whatever the attestation says. Open it once, then choose **Open Anyway** in System Settings > Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/MomentumMenu.app`.
+
+## Crash reports
+
+If the app crashes, macOS saves a report as `~/Library/Logs/DiagnosticReports/MomentumMenu-<date>.ips`; Console > Crash Reports shows the same list. Attach it to an [issue](https://github.com/agrmohit/momentum-menu/issues).
+
+The released binary is stripped, so a report shows the app's frames as addresses. Each release's `MomentumMenu-<version>.dSYM.zip` (debug symbols) turns them back into functions and lines. To read a report:
+
+1. Download the dSYM for the version on the report's first line (`app_version`), and unpack it:
+
+   ```sh
+   gh release download v2.2.1 -R agrmohit/momentum-menu -p '*.dSYM.zip'
+   ditto -x -k MomentumMenu-2.2.1.dSYM.zip .
+   ```
+
+2. Check its UUID against the `uuid` of the `MomentumMenu` entry in the report's `usedImages`:
+
+   ```sh
+   dwarfdump --uuid MomentumMenu.dSYM
+   ```
+
+   **Only a matching dSYM works.** Another build's dSYM can give wrong names, and rebuilding the tag need not reproduce the UUID.
+
+3. Resolve a frame. The load address is that image's `base`; a frame's address is `base` plus its `imageOffset`:
+
+   ```sh
+   atos -arch arm64 -o MomentumMenu.dSYM/Contents/Resources/DWARF/MomentumMenu -l <base> <address>
+   ```
+
+> [!NOTE]
+> On a Mac that has built the app, Spotlight indexes the local `build/MomentumMenu.dSYM`, so `atos` can name frames without being given the right dSYM. To see which symbols are really in use, run `lldb <binary>` and then `image list -S MomentumMenu`.
 
 ## Build and run
 
