@@ -486,7 +486,8 @@ public final class HeadphoneController: ObservableObject {
             state.bluetoothOff = false
             state.lastError = nil
         }
-        guard let deadline = resumeDeadline, now < deadline else { return }
+        // Already back: the headphones relinked before this notice.
+        guard !state.connected, let deadline = resumeDeadline, now < deadline else { return }
         resumeDeadline = nil
         wakeArmed = true
         startEventConnect()
@@ -531,6 +532,9 @@ public final class HeadphoneController: ObservableObject {
             try await transport.connect(allowWake: userInitiated || resuming)
             guard link == links else { return abandon() }
             guard transport.isOpen else { return }
+            // The link is up, so a wake armed while this connect ran has
+            // nothing left to do; kept, a later poll would use it.
+            wakeArmed = false
             state.deviceName = transport.deviceName
             state.lastError = nil
             state.bluetoothOff = false

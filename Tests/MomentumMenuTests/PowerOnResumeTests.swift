@@ -20,8 +20,8 @@ final class PowerOnResumeTests: XCTestCase {
         case powerOnThenRelease
         /// Try Again clicked after the power-on notice, before its connect runs.
         case powerOnThenTryAgain
-        /// Power-on while the 60 s poll's connect is opening; that connect fails.
-        case powerOnDuringFailingPoll
+        /// Power-on while the 60 s poll's connect is opening.
+        case powerOnDuringPoll(pollFails: Bool)
         /// The 60 s poll's connect.
         case poll
         case release
@@ -90,10 +90,18 @@ final class PowerOnResumeTests: XCTestCase {
         ], wakes: 1, connected: false),
         // Greptile, PR #3: a busy moment at power-on dropped the wake for good.
         Row(name: "power-on while the poll is connecting; the next poll wakes", events: [
-            .connect, .powerOff, .drop, .powerOnDuringFailingPoll, .poll,
+            .connect, .powerOff, .drop, .powerOnDuringPoll(pollFails: true), .poll,
         ], wakes: 1, connected: true),
         Row(name: "an unused wake ends at the next power-off", events: [
-            .connect, .powerOff, .drop, .powerOnDuringFailingPoll, .wait(.seconds(30)), .powerOff, .powerOn, .poll,
+            .connect, .powerOff, .drop, .powerOnDuringPoll(pollFails: true), .wait(.seconds(30)), .powerOff, .powerOn, .poll,
+        ], wakes: 0, connected: true),
+        // Greptile, PR #3: a wake armed while a connect was running or done
+        // outlived it, and a later poll took the headphones back.
+        Row(name: "headphones relinked before the power-on notice", events: [
+            .connect, .powerOff, .drop, .poll, .powerOn, .drop, .poll,
+        ], wakes: 0, connected: true),
+        Row(name: "power-on while the poll is connecting; the poll succeeds", events: [
+            .connect, .powerOff, .drop, .powerOnDuringPoll(pollFails: false), .drop, .poll,
         ], wakes: 0, connected: true),
         Row(name: "Try Again uses up the wake", events: [
             .connect, .powerOff, .drop, .powerOnThenTryAgain, .drop, .poll,
@@ -125,8 +133,8 @@ final class PowerOnResumeTests: XCTestCase {
             case .powerOnThenTryAgain:
                 fake.power(on: true)
                 await controller.connect(userInitiated: true)
-            case .powerOnDuringFailingPoll:
-                fake.connectError = .notConnected
+            case .powerOnDuringPoll(let pollFails):
+                fake.connectError = pollFails ? .notConnected : nil
                 fake.holdConnects = true
                 let poll = Task { await controller.connect() }
                 while !fake.isHoldingConnect { await Task.yield() }
