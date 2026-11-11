@@ -282,8 +282,8 @@ private struct DisconnectedPanel: View {
                     ProgressView().controlSize(.small)
                     Text("Connecting…").font(.callout).foregroundStyle(.secondary)
                 }
-                Text("Opening the control channel. This can take a few seconds, "
-                     + "especially just after the headphones wake up.")
+                Text("Looking for the headphones. This can take up to 15 seconds "
+                     + "if they are off or out of range.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

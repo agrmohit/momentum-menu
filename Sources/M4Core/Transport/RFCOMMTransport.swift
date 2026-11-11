@@ -70,6 +70,8 @@ final class RFCOMMTransport: NSObject {
     /// comes first. Cleared before resuming so it can only fire once.
     private var openContinuation: CheckedContinuation<IOReturn, Never>?
     private var sdpContinuation: CheckedContinuation<Void, Never>?
+    /// Resumed by `connectionComplete`, or by the timeout in `openLink`.
+    private var linkContinuation: CheckedContinuation<IOReturn, Never>?
     private var lastOpenStatus: IOReturn = kIOReturnError
     /// Set by `disconnect` and `releaseLink`; a connect still trying channels
     /// stops at the next one.
@@ -168,7 +170,8 @@ final class RFCOMMTransport: NSObject {
 
         if !target.isConnected() {
             guard allowWake else { throw TransportError.notConnected }
-            let status = target.openConnection()
+            let status = await openLink(to: target)
+            guard !stopped else { throw TransportError.notConnected }
             guard status == kIOReturnSuccess, target.isConnected() else {
                 throw TransportError.notConnected
             }
@@ -186,6 +189,32 @@ final class RFCOMMTransport: NSObject {
         if try await openGaiaChannel(on: target) { return }
 
         throw TransportError.channelOpenFailed(lastOpenStatus)
+    }
+
+    /// Brings the Bluetooth link up without blocking the main thread.
+    ///
+    /// The blocking `openConnection()` froze the app for the whole page
+    /// timeout when the headphones were off: about 15 s, three 5 s tries.
+    /// This form returns at once and reports through `connectionComplete`.
+    private func openLink(to target: IOBluetoothDevice) async -> IOReturn {
+        waits += 1
+        let wait = waits
+        return await withCheckedContinuation { continuation in
+            linkContinuation = continuation
+            let status = target.openConnection(self)
+            guard status == kIOReturnSuccess else {
+                linkContinuation = nil
+                continuation.resume(returning: status)
+                return
+            }
+            // A safety net only: macOS gave up after 15.4 s when measured.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, self.waits == wait, let pending = self.linkContinuation else { return }
+                self.linkContinuation = nil
+                pending.resume(returning: kIOReturnTimeout)
+            }
+        }
     }
 
     /// Re-queries the device's SDP records rather than trusting the cache.
@@ -434,6 +463,13 @@ extension RFCOMMTransport: @preconcurrency IOBluetoothRFCOMMChannelDelegate {
         while let frame = GaiaFrame.decode(consuming: &inbound) {
             onFrame?(frame)
         }
+    }
+
+    /// Target callback for `openConnection(_:)`.
+    @objc func connectionComplete(_ device: IOBluetoothDevice!, status: IOReturn) {
+        guard let pending = linkContinuation else { return }
+        linkContinuation = nil
+        pending.resume(returning: status)
     }
 
     /// Target callback for performSDPQuery.
