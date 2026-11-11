@@ -299,7 +299,7 @@ private struct DisconnectedPanel: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("The headphones must be paired and switched on.")
+                Text(state.disconnectedHint)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
