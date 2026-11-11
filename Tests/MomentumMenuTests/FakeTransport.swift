@@ -28,8 +28,20 @@ final class FakeTransport: GaiaTransport {
     /// `allowWake` of every connect, in order.
     private(set) var connects: [Bool] = []
 
+    /// Makes connects wait in `connect` until `releaseHeldConnect()`, so a
+    /// test can act while one is under way.
+    var holdConnects = false
+    private var heldConnect: CheckedContinuation<Void, Never>?
+    var isHoldingConnect: Bool { heldConnect != nil }
+
+    func releaseHeldConnect() {
+        heldConnect?.resume()
+        heldConnect = nil
+    }
+
     func connect(allowWake: Bool) async throws {
         connects.append(allowWake)
+        if holdConnects { await withCheckedContinuation { heldConnect = $0 } }
         if let connectError { throw connectError }
         isOpen = true
     }
