@@ -221,6 +221,8 @@ public struct DeviceState: Sendable {
     /// Stops the app's background poll from quietly grabbing them back.
     public var releasedByUser = false
     public var lastError: String?
+    /// The last connect failed because Bluetooth itself is off.
+    public var bluetoothOff = false
     /// Nil until read, or when the last read failed.
     public var pairedDevices: [PairedDevice]?
     /// How many devices can be connected at once; 2 on a MOMENTUM 4.
@@ -232,6 +234,15 @@ public struct DeviceState: Sendable {
     /// something still being done.
     public var isFullyCharged: Bool {
         isCharging == true && (batteryPercent ?? 0) >= 100
+    }
+
+    static let bluetoothOffHint = "Use Control Center or System Settings > Bluetooth."
+    static let headphonesAwayHint = "The headphones must be paired and switched on."
+
+    /// The line under the error while disconnected. Pairing advice is wrong
+    /// when Bluetooth is off: the pairing is still there.
+    public var disconnectedHint: String {
+        bluetoothOff ? Self.bluetoothOffHint : Self.headphonesAwayHint
     }
 
     /// "Charging", "Charged", or nothing at all when running on battery.
@@ -443,6 +454,7 @@ public final class HeadphoneController: ObservableObject {
             guard transport.isOpen else { return }
             state.deviceName = transport.deviceName
             state.lastError = nil
+            state.bluetoothOff = false
             // Subscribing below is the first write. Other Sennheiser models
             // share the GAIA service but not this command map. Not connected
             // until then: the popover shows its controls once connected.
@@ -464,6 +476,11 @@ public final class HeadphoneController: ObservableObject {
             guard link == links else { return abandon() }
             state.connected = false
             state.lastError = error.localizedDescription
+            if case TransportError.bluetoothOff = error {
+                state.bluetoothOff = true
+            } else {
+                state.bluetoothOff = false
+            }
         }
     }
 

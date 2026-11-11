@@ -4,6 +4,7 @@ import IOBluetooth
 /// Errors surfaced to the UI. Deliberately plain-language: these end up in a
 /// menu bar popover, not a log file.
 public enum TransportError: LocalizedError {
+    case bluetoothOff
     case headphonesNotFound
     case notConnected
     case gaiaServiceMissing
@@ -16,6 +17,8 @@ public enum TransportError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
+        case .bluetoothOff:
+            return "Bluetooth is off. Turn it on to control the headphones."
         case .headphonesNotFound:
             return "No paired MOMENTUM 4 found. Pair the headphones in System Settings first."
         case .notConnected:
@@ -112,6 +115,15 @@ final class RFCOMMTransport: NSObject {
         return records
     }
 
+    /// The error a connect raises before it touches a device, or nil to go on.
+    /// Power comes first: with the radio off the GAIA lookup comes back empty,
+    /// and "not found" would send the user to re-pair working headphones.
+    nonisolated static func discoveryError(poweredOn: Bool, hasCandidate: Bool) -> TransportError? {
+        if !poweredOn { return .bluetoothOff }
+        if !hasCandidate { return .headphonesNotFound }
+        return nil
+    }
+
     /// - Parameter allowWake: whether we may bring the Bluetooth link up when
     ///   the headphones are idle. Only ever true for an action the user just
     ///   took. Background refreshes pass false, because `openConnection()`
@@ -120,9 +132,12 @@ final class RFCOMMTransport: NSObject {
     ///   user just handed them to. An app that reads a battery percentage has
     ///   no business doing that once a minute.
     func connect(allowWake: Bool = false) async throws {
-        guard let target = Self.discoverCandidates().first else {
-            throw TransportError.headphonesNotFound
+        let poweredOn = IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
+        let target = poweredOn ? Self.discoverCandidates().first : nil
+        if let error = Self.discoveryError(poweredOn: poweredOn, hasCandidate: target != nil) {
+            throw error
         }
+        guard let target else { preconditionFailure("discoveryError passed without a candidate") }
         device = target
         stopped = false
 

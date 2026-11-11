@@ -21,7 +21,13 @@ final class FakeTransport: GaiaTransport {
     /// throw. Models a callback that fires while a write is still under way.
     var duringSend: ((GaiaFrame) throws -> Void)?
 
-    func connect(allowWake: Bool) async throws { isOpen = true }
+    /// Thrown by the next connects instead of opening; nil opens.
+    var connectError: TransportError?
+
+    func connect(allowWake: Bool) async throws {
+        if let connectError { throw connectError }
+        isOpen = true
+    }
 
     func send(_ frame: GaiaFrame) throws {
         guard isOpen else { throw TransportError.notConnected }
