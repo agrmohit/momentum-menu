@@ -10,6 +10,9 @@ protocol GaiaTransport: AnyObject {
     var onFrame: ((GaiaFrame) -> Void)? { get set }
     /// Called when the channel drops, on the main thread.
     var onDisconnect: (() -> Void)? { get set }
+    /// Called when a GAIA device's Bluetooth link to this Mac comes up, on the
+    /// main thread. The control channel is not open yet.
+    var onDeviceConnected: (() -> Void)? { get set }
     var isOpen: Bool { get }
     var deviceName: String? { get }
 

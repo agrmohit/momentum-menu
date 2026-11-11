@@ -83,6 +83,22 @@ final class RFCOMMTransport: NSObject {
     var onFrame: ((GaiaFrame) -> Void)?
     /// Called when the channel drops.
     var onDisconnect: (() -> Void)?
+    var onDeviceConnected: (() -> Void)?
+
+    override init() {
+        super.init()
+        // IOBluetooth holds the registration for the app's lifetime; the
+        // returned handle is needed only to unregister, which we never do.
+        IOBluetoothDevice.register(forConnectNotifications: self,
+                                   selector: #selector(deviceConnected(_:device:)))
+    }
+
+    /// Target of the connect notification. Fires for every device, so only
+    /// GAIA ones are passed on, matching `discoverCandidates`.
+    @objc private func deviceConnected(_ note: IOBluetoothUserNotification?, device: IOBluetoothDevice?) {
+        guard let device, device.getServiceRecord(for: Self.sdpUUID()) != nil else { return }
+        onDeviceConnected?()
+    }
 
     var isOpen: Bool { channel?.isOpen() ?? false }
     var deviceName: String? { device?.name }
