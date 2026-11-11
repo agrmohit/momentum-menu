@@ -84,6 +84,7 @@ final class RFCOMMTransport: NSObject {
     /// Called when the channel drops.
     var onDisconnect: (() -> Void)?
     var onDeviceConnected: (() -> Void)?
+    var onPowerChanged: ((Bool) -> Void)?
 
     override init() {
         super.init()
@@ -91,7 +92,15 @@ final class RFCOMMTransport: NSObject {
         // returned handle is needed only to unregister, which we never do.
         IOBluetoothDevice.register(forConnectNotifications: self,
                                    selector: #selector(deviceConnected(_:device:)))
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(poweredOn),
+                           name: .IOBluetoothHostControllerPoweredOn, object: nil)
+        center.addObserver(self, selector: #selector(poweredOff),
+                           name: .IOBluetoothHostControllerPoweredOff, object: nil)
     }
+
+    @objc private func poweredOn() { onPowerChanged?(true) }
+    @objc private func poweredOff() { onPowerChanged?(false) }
 
     /// Target of the connect notification. Fires for every device, so only
     /// GAIA ones are passed on, matching `discoverCandidates`.

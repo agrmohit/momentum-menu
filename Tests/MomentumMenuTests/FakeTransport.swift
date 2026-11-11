@@ -10,6 +10,7 @@ final class FakeTransport: GaiaTransport {
     var onFrame: ((GaiaFrame) -> Void)?
     var onDisconnect: (() -> Void)?
     var onDeviceConnected: (() -> Void)?
+    var onPowerChanged: ((Bool) -> Void)?
     var isOpen = false
     var deviceName: String? = "MOMENTUM 4"
 
@@ -57,6 +58,10 @@ final class FakeTransport: GaiaTransport {
     /// The headphones' Bluetooth link coming up, as the connect notification
     /// reports it.
     func linkUp() { onDeviceConnected?() }
+
+    /// Bluetooth turning on or off, as the host controller notifications
+    /// report it.
+    func power(on: Bool) { onPowerChanged?(on) }
 
     /// Delivers a frame the device volunteers, such as a notification.
     func push(_ frame: GaiaFrame) { onFrame?(frame) }
