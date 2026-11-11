@@ -13,6 +13,9 @@ protocol GaiaTransport: AnyObject {
     /// Called when a GAIA device's Bluetooth link to this Mac comes up, on the
     /// main thread. The control channel is not open yet.
     var onDeviceConnected: (() -> Void)? { get set }
+    /// Called with true when Bluetooth turns on and false when it turns off,
+    /// on the main thread.
+    var onPowerChanged: ((Bool) -> Void)? { get set }
     var isOpen: Bool { get }
     var deviceName: String? { get }
 
