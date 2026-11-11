@@ -8,6 +8,7 @@ import XCTest
 private final class GatedTransport: GaiaTransport {
     var onFrame: ((GaiaFrame) -> Void)?
     var onDisconnect: (() -> Void)?
+    var onDeviceConnected: (() -> Void)?
     var isOpen = false
     var deviceName: String? = "MOMENTUM 4"
     private(set) var sent: [GaiaFrame] = []

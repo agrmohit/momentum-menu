@@ -416,6 +416,26 @@ public final class HeadphoneController: ObservableObject {
                 self.markDisconnected()
             }
         }
+        // The link coming up (Bluetooth back on, headphones switched on, or
+        // handed back) is the moment a background connect can succeed. Not
+        // user-initiated, so it never wakes them and respects a release.
+        transport.onDeviceConnected = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.startEventConnect()
+            }
+        }
+    }
+
+    /// The connect a link-up started, while it runs. One at a time: a second
+    /// link-up during it has nothing to add.
+    private(set) var eventConnect: Task<Void, Never>?
+
+    private func startEventConnect() {
+        guard eventConnect == nil else { return }
+        eventConnect = Task {
+            await connect()
+            eventConnect = nil
+        }
     }
 
     /// Bumped whenever the link ends: a release, a quit or a drop. A connect

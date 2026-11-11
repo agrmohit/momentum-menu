@@ -9,6 +9,7 @@ import Foundation
 final class FakeTransport: GaiaTransport {
     var onFrame: ((GaiaFrame) -> Void)?
     var onDisconnect: (() -> Void)?
+    var onDeviceConnected: (() -> Void)?
     var isOpen = false
     var deviceName: String? = "MOMENTUM 4"
 
@@ -23,8 +24,11 @@ final class FakeTransport: GaiaTransport {
 
     /// Thrown by the next connects instead of opening; nil opens.
     var connectError: TransportError?
+    /// `allowWake` of every connect, in order.
+    private(set) var connects: [Bool] = []
 
     func connect(allowWake: Bool) async throws {
+        connects.append(allowWake)
         if let connectError { throw connectError }
         isOpen = true
     }
@@ -49,6 +53,10 @@ final class FakeTransport: GaiaTransport {
         isOpen = false
         onDisconnect?()
     }
+
+    /// The headphones' Bluetooth link coming up, as the connect notification
+    /// reports it.
+    func linkUp() { onDeviceConnected?() }
 
     /// Delivers a frame the device volunteers, such as a notification.
     func push(_ frame: GaiaFrame) { onFrame?(frame) }
