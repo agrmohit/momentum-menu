@@ -422,7 +422,7 @@ public final class HeadphoneController: ObservableObject {
         // user-initiated, so it never wakes them and respects a release.
         transport.onDeviceConnected = { [weak self] in
             MainActor.assumeIsolated {
-                self?.startEventConnect(wake: false)
+                self?.startEventConnect()
             }
         }
         transport.onPowerChanged = { [weak self] poweredOn in
@@ -443,6 +443,9 @@ public final class HeadphoneController: ObservableObject {
     /// Set at power-off when this Mac had the headphones; a power-on before
     /// it may wake them.
     private var resumeDeadline: ContinuousClock.Instant?
+    /// Set by a power-on that may resume. The next connect to get past its
+    /// guards takes it, so a connect already running cannot swallow it.
+    private var wakeArmed = false
 
     /// How close a drop must be to the power-off to count as caused by it.
     /// Measured: the channel closed 150 ms before the power-off broadcast.
@@ -451,14 +454,10 @@ public final class HeadphoneController: ObservableObject {
     /// headphones may have moved to other devices since.
     static let resumeLimit: Duration = .seconds(30 * 60)
 
-    private func startEventConnect(wake: Bool) {
+    private func startEventConnect() {
         guard eventConnect == nil else { return }
         eventConnect = Task {
-            // Checked here, not when queued: `connect(userInitiated: true)`
-            // clears a release, and one can land in between.
-            if !(wake && state.releasedByUser) {
-                await connect(userInitiated: wake)
-            }
+            await connect()
             eventConnect = nil
         }
     }
@@ -467,21 +466,30 @@ public final class HeadphoneController: ObservableObject {
     ///
     /// Headphones still linked to a phone do not relink to the Mac on their
     /// own when its Bluetooth comes back, so only a wake reconnects them.
-    /// Waking is allowed once, within `resumeLimit`, if this Mac had them at
-    /// power-off: connected then, or dropped within `powerOffDropWindow`
-    /// before, since the channel can close before the broadcast. It restores
-    /// the Mac's own multipoint slot and never overrides a release.
+    /// A power-on arms one wake, within `resumeLimit`, if this Mac had them
+    /// at power-off: connected then, or dropped within `powerOffDropWindow`
+    /// before, since the channel can close before the broadcast. The next
+    /// background connect uses it. It restores the Mac's own multipoint slot,
+    /// and a release still stops it: background connects skip a release.
     private func bluetoothPowerChanged(on poweredOn: Bool) {
         let now = now()
         guard poweredOn else {
             let droppedByPowerOff = lastDrop.map { now - $0 < Self.powerOffDropWindow } ?? false
             let hadThem = state.connected || droppedByPowerOff
             resumeDeadline = hadThem ? now + Self.resumeLimit : nil
+            wakeArmed = false
+            state.bluetoothOff = true
+            state.lastError = TransportError.bluetoothOff.errorDescription
             return
+        }
+        if state.bluetoothOff {
+            state.bluetoothOff = false
+            state.lastError = nil
         }
         guard let deadline = resumeDeadline, now < deadline else { return }
         resumeDeadline = nil
-        startEventConnect(wake: true)
+        wakeArmed = true
+        startEventConnect()
     }
 
     /// Bumped whenever the link ends: a release, a quit or a drop. A connect
@@ -510,12 +518,17 @@ public final class HeadphoneController: ObservableObject {
         state.isConnecting = true
         defer { state.isConnecting = false }
         let link = links
+        // Taken even by a user connect, which wakes anyway, so it cannot
+        // linger for a later background one.
+        let resuming = wakeArmed
+        wakeArmed = false
 
         do {
-            // Only a deliberate action may wake the headphones onto this Mac.
-            // This now returns once the channel has actually opened, rather
-            // than once the request was accepted.
-            try await transport.connect(allowWake: userInitiated)
+            // Only a deliberate action, or a resume after Bluetooth off and
+            // on, may wake the headphones onto this Mac. This now returns once
+            // the channel has actually opened, rather than once the request
+            // was accepted.
+            try await transport.connect(allowWake: userInitiated || resuming)
             guard link == links else { return abandon() }
             guard transport.isOpen else { return }
             state.deviceName = transport.deviceName

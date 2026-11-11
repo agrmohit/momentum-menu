@@ -18,6 +18,12 @@ final class PowerOnResumeTests: XCTestCase {
         case powerOn
         /// A release landing after the power-on notice, before its connect runs.
         case powerOnThenRelease
+        /// Try Again clicked after the power-on notice, before its connect runs.
+        case powerOnThenTryAgain
+        /// Power-on while the 60 s poll's connect is opening; that connect fails.
+        case powerOnDuringFailingPoll
+        /// The 60 s poll's connect.
+        case poll
         case release
         /// Makes later connects throw this; nil lets them open.
         case connectsFail(TransportError?)
@@ -82,12 +88,22 @@ final class PowerOnResumeTests: XCTestCase {
             .connect, .powerOff, .drop, .connectsFail(.notConnected), .powerOn, .wait(.seconds(5)),
             .powerOff, .powerOn,
         ], wakes: 1, connected: false),
+        // Greptile, PR #3: a busy moment at power-on dropped the wake for good.
+        Row(name: "power-on while the poll is connecting; the next poll wakes", events: [
+            .connect, .powerOff, .drop, .powerOnDuringFailingPoll, .poll,
+        ], wakes: 1, connected: true),
+        Row(name: "an unused wake ends at the next power-off", events: [
+            .connect, .powerOff, .drop, .powerOnDuringFailingPoll, .wait(.seconds(30)), .powerOff, .powerOn, .poll,
+        ], wakes: 0, connected: true),
+        Row(name: "Try Again uses up the wake", events: [
+            .connect, .powerOff, .drop, .powerOnThenTryAgain, .drop, .poll,
+        ], wakes: 1, connected: true),
         Row(name: "Bluetooth still off when the wake runs", events: [
             .connect, .powerOff, .drop, .connectsFail(.bluetoothOff), .powerOn,
         ], wakes: 1, connected: false),
     ]
 
-    private func run(_ row: Row) async -> (wakes: Int, connected: Bool) {
+    private func run(_ row: Row) async -> (wakes: Int, connected: Bool, controller: HeadphoneController) {
         let fake = FakeTransport()
         fake.respond = Reply.device(battery: 50)
         let controller = HeadphoneController(transport: fake)
@@ -106,13 +122,70 @@ final class PowerOnResumeTests: XCTestCase {
             case .powerOnThenRelease:
                 fake.power(on: true)
                 controller.releaseHeadphones()
+            case .powerOnThenTryAgain:
+                fake.power(on: true)
+                await controller.connect(userInitiated: true)
+            case .powerOnDuringFailingPoll:
+                fake.connectError = .notConnected
+                fake.holdConnects = true
+                let poll = Task { await controller.connect() }
+                while !fake.isHoldingConnect { await Task.yield() }
+                fake.power(on: true)
+                await controller.eventConnect?.value
+                fake.holdConnects = false
+                fake.releaseHeldConnect()
+                await poll.value
+                fake.connectError = nil
+            case .poll: await controller.connect()
             case .release: controller.releaseHeadphones()
             case .connectsFail(let error): fake.connectError = error
             }
             await controller.eventConnect?.value
         }
         let wakes = fake.connects.dropFirst(setupConnects).filter { $0 }.count
-        return (wakes, controller.state.connected)
+        return (wakes, controller.state.connected, controller)
+    }
+
+    // MARK: - What the popover says
+
+    private struct MessageRow {
+        let name: String
+        let events: [Event]
+        let message: String?
+        let hint: String
+    }
+
+    private static let offMessage = TransportError.bluetoothOff.errorDescription
+    private static let offHint = DeviceState.bluetoothOffHint
+    private static let awayHint = DeviceState.headphonesAwayHint
+
+    /// Greptile, PR #3: an open popover kept the pairing advice after
+    /// Bluetooth went off, until the next poll.
+    private static let messageRows: [MessageRow] = [
+        MessageRow(name: "drop then power-off", events: [.connect, .drop, .powerOff],
+                   message: offMessage, hint: offHint),
+        MessageRow(name: "power-off then drop", events: [.connect, .powerOff, .drop],
+                   message: offMessage, hint: offHint),
+        MessageRow(name: "power-off while never connected", events: [.powerOff],
+                   message: offMessage, hint: offHint),
+        MessageRow(name: "power-off then on, nothing to resume", events: [.powerOff, .powerOn],
+                   message: nil, hint: awayHint),
+        MessageRow(name: "power-off then on, resume fails", events: [
+            .connect, .powerOff, .drop, .connectsFail(.notConnected), .powerOn,
+        ], message: TransportError.notConnected.errorDescription, hint: awayHint),
+        MessageRow(name: "power-on alone keeps another error", events: [
+            .connectsFail(.headphonesNotFound), .poll, .powerOn,
+        ], message: TransportError.headphonesNotFound.errorDescription, hint: awayHint),
+        MessageRow(name: "power-off twice", events: [.powerOff, .powerOff],
+                   message: offMessage, hint: offHint),
+    ]
+
+    func testMessageFollowsPower() async {
+        for row in Self.messageRows {
+            let controller = await run(Row(name: row.name, events: row.events, wakes: 0, connected: false)).controller
+            XCTAssertEqual(controller.state.lastError, row.message, row.name)
+            XCTAssertEqual(controller.state.disconnectedHint, row.hint, row.name)
+        }
     }
 
     func testWakesOnPowerOn() async {
