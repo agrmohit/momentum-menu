@@ -291,14 +291,11 @@ public struct DeviceState: Sendable {
         return devices.filter(\.isConnected).count >= max
     }
 
-    /// 0x1403 only disconnects from FW 3.38.3 (Ariazonaa/momentum-control captures);
-    /// on 2.13.42 it erased a pairing, and nothing between was tested.
-    public var canDisconnectOthers: Bool {
-        guard let version = firmwareVersion else { return false }
-        return !version.lexicographicallyPrecedes(Self.firstSafeDisconnectFirmware)
-    }
+    /// Disconnect (0x1403) runs only on the firmware it was tested on:
+    /// it erased a pairing on 2.13.42.
+    public var canChangePairings: Bool { firmwareVersion == Self.testedPairingFirmware }
 
-    static let firstSafeDisconnectFirmware = [3, 38, 3]
+    static let testedPairingFirmware = [3, 38, 3]
 
     /// True when the device is running firmware old enough to lack the
     /// equaliser entirely.
@@ -597,6 +594,11 @@ public final class HeadphoneController: ObservableObject {
         state.sampleRateHz = nil
         state.pairedDevices = nil
         state.maxConnections = nil
+        // An update reboots the headphones, so the firmware is read again on
+        // every link; until then `canChangePairings` refuses.
+        state.firmware = nil
+        state.firmwareMajor = nil
+        state.firmwareVersion = nil
         // The phone may change the mode while this Mac is away.
         knownAdaptive = nil
     }
@@ -1049,9 +1051,8 @@ public final class HeadphoneController: ObservableObject {
     }
 
     /// Disconnects a paired device. For this Mac that is a hand-over, as
-    /// the power button does; others take 0x1403, on FW 3.38.3 and newer
-    /// only: 2.13.42 erased a pairing with it. `request` enforces that, and
-    /// the menu offers no Disconnect below it.
+    /// the power button does; others take 0x1403, on the tested firmware
+    /// only (`canChangePairings`, enforced in `request`).
     public func disconnect(_ device: PairedDevice) async {
         if device.isThisMac {
             guard state.pairedAction == nil else { return }
@@ -1141,15 +1142,19 @@ public final class HeadphoneController: ObservableObject {
 
     // MARK: - Request plumbing
 
+    static func untestedFirmwareReason(_ command: UInt16) -> String {
+        let tested = DeviceState.testedPairingFirmware.map(String.init).joined(separator: ".")
+        return String(format: "0x%04X is allowed only on firmware %@, the version it was tested on", command, tested)
+    }
+
     @discardableResult
     func request(_ command: UInt16, payload: [UInt8] = [], timeout: Duration = .seconds(2)) async throws -> [UInt8] {
         if let reason = CommandSafety.rejectionReason(for: command, payload: payload) {
             throw TransportError.blockedCommand(reason: reason)
         }
         // CommandSafety cannot see the firmware; every send passes here.
-        if command == Cmd.disconnectPairedDevice, !state.canDisconnectOthers {
-            throw TransportError.blockedCommand(
-                reason: "0x1403 needs firmware 3.38.3 or newer; on 2.13.42 it erased a pairing")
+        if CommandSafety.pairingChanges.contains(command), !state.canChangePairings {
+            throw TransportError.blockedCommand(reason: Self.untestedFirmwareReason(command))
         }
 
         let previous = lastRequest[command]

@@ -136,7 +136,7 @@ enum Cmd {
     static let connectPairedDevice: UInt16 = 0x1402
     /// -> [index] ; <- empty OK. Disconnects and keeps the pairing on
     /// FW 3.38.3; erased a pairing on 2.13.42. `HeadphoneController.request`
-    /// refuses it below 3.38.3 (`DeviceState.canDisconnectOthers`).
+    /// refuses it on any other firmware (`DeviceState.canChangePairings`).
     static let disconnectPairedDevice: UInt16 = 0x1403
     /// -> [index] ; <- [index, connected 0/1]. Also pushed as 0x1484.
     static let getPairedDeviceStatus: UInt16 = 0x1404
@@ -163,6 +163,10 @@ enum CommandSafety {
     /// (Ariazonaa/momentum-control catalogue). Only the prompts write is
     /// verified there; the app sends none of them.
     static let untestedWrites: Set<UInt16> = [0x0801, 0x0805, 0x0817]
+
+    /// Erase or drop a pairing; sent only on the tested firmware
+    /// (`DeviceState.canChangePairings`, checked in `HeadphoneController.request`).
+    static let pairingChanges: Set<UInt16> = [Cmd.disconnectPairedDevice]
 
     /// The 0x06xx group is power/system space and is known to reset the link
     /// at more ids than the three above. Only battery is allowed out of it.
