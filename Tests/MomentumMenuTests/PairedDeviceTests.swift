@@ -10,29 +10,6 @@ final class PairedDeviceTests: XCTestCase {
 
     private final class Box<T> { var value: T; init(_ value: T) { self.value = value } }
 
-    private func connected(_ device: FakeHeadset,
-                           wrap: ((GaiaFrame, FakeTransport) -> [GaiaFrame]?)? = nil)
-        async -> (HeadphoneController, FakeTransport) {
-        let fake = FakeTransport()
-        fake.respond = { [weak fake] frame in
-            guard let fake else { return [] }
-            if let replies = wrap?(frame, fake) { return replies }
-            return device.respond(frame, push: { fake.push($0) })
-        }
-        let controller = HeadphoneController(transport: fake)
-        // Generous: only rows that never connect wait for the deadline.
-        controller.peerPollInterval = .milliseconds(5)
-        controller.peerConnectTimeout = .milliseconds(500)
-        await controller.connect()
-        return (controller, fake)
-    }
-
-    /// Waits for a condition instead of a fixed sleep, up to a limit.
-    private func settle(within limit: Duration = .seconds(2), until done: () -> Bool) async {
-        let deadline = ContinuousClock.now + limit
-        while !done(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
-    }
-
     private static func entry(_ index: UInt8, priority: UInt8? = nil, _ connected: UInt8, _ name: [UInt8]) -> [UInt8] {
         [index, priority ?? index, connected] + name
     }
@@ -142,9 +119,13 @@ final class PairedDeviceTests: XCTestCase {
         var ownIndexReply: [UInt8]?
         var countReply: [UInt8]?
         var entryReplies: [Int: [UInt8]] = [:]
+        /// Empty slots, left out of the count.
+        var gaps: Set<Int> = []
         var rejects: Set<UInt16> = []
         /// "name on|off [mac]"; nil when the list is unknown.
         let shown: [String]?
+        /// The headphones' index for each device; checked where set.
+        var indexes: [Int]?
     }
 
     private static let sixteen = Dictionary(uniqueKeysWithValues: (0..<20).map {
@@ -189,6 +170,42 @@ final class PairedDeviceTests: XCTestCase {
         ListRow(name: "empty name", entryReplies: [1: entry(1, 0, [0])], shown: ["MacBook on mac", " off"]),
         ListRow(name: "two devices with one name", paired: [("MacBook", true), ("iPhone", false), ("iPhone", true)],
                 shown: ["MacBook on mac", "iPhone off", "iPhone on"]),
+    ] + gapRows
+
+    /// After a forget the headphones keep an empty slot: its entry read
+    /// answers OK `[FF FF FF 00]`, and the count leaves it out. Captured on
+    /// FW 3.38.3 (forgetting index 2 of five). Devices keep their index.
+    private static let gapRows: [ListRow] = [
+        ListRow(name: "captured: gap at index 2 of five",
+                paired: [("Mohit's S25", true), ("mohit-unifize", true), ("", false),
+                         ("Mohit’s MacBook", false), ("motoji", false)],
+                ownIndex: 1, gaps: [2],
+                shown: ["Mohit's S25 on", "mohit-unifize on mac", "Mohit’s MacBook off", "motoji off"], indexes: [0, 1, 3, 4]),
+        ListRow(name: "gap between two devices", paired: [("MacBook", true), ("", false), ("iPad", false)],
+                gaps: [1], shown: ["MacBook on mac", "iPad off"], indexes: [0, 2]),
+        ListRow(name: "gap first, this Mac after it", paired: [("", false), ("MacBook", true), ("iPhone", false)],
+                ownIndex: 1, gaps: [0], shown: ["MacBook on mac", "iPhone off"], indexes: [1, 2]),
+        ListRow(name: "gap last", paired: [("MacBook", true), ("iPhone", false), ("", false)],
+                gaps: [2], shown: ["MacBook on mac", "iPhone off"], indexes: [0, 1]),
+        ListRow(name: "two gaps in a row", paired: [("MacBook", true), ("", false), ("", false), ("PC", false)],
+                gaps: [1, 2], shown: ["MacBook on mac", "PC off"], indexes: [0, 3]),
+        ListRow(name: "own index on a gap is not trusted", paired: [("MacBook", true), ("", false)], ownIndex: 1,
+                gaps: [1], shown: ["MacBook on"], indexes: [0]),
+        ListRow(name: "only gaps, count zero", paired: [("", false), ("", false)], gaps: [0, 1], shown: []),
+        // The count names a device the slots never yield: past them, a refusal.
+        ListRow(name: "count names a device only gaps hold", paired: [("", false), ("", false)], countReply: [0, 1],
+                gaps: [0, 1], shown: nil),
+        ListRow(name: "last device on the last index read",
+                paired: (0..<15).map { _ in ("", false) } + [("MacBook", true)], ownIndex: 15,
+                gaps: Set(0..<15), shown: ["MacBook on mac"], indexes: [15]),
+        // Never asks past index 15, so a device behind 16 slots is lost.
+        ListRow(name: "device past the last index read",
+                paired: (0..<16).map { _ in ("", false) } + [("MacBook", true)], ownIndex: 16,
+                gaps: Set(0..<16), shown: nil),
+        // Only the whole captured marker is a gap; anything else is malformed.
+        ListRow(name: "gap marker cut short", countReply: [0, 1], entryReplies: [0: [0xFF]], shown: nil),
+        ListRow(name: "gap marker with a stray byte", countReply: [0, 1], entryReplies: [0: [0xFF, 0xFF, 0xFF, 0x01]],
+                shown: nil),
     ]
 
     func testConnectReadsThePairedDevices() async {
@@ -199,9 +216,22 @@ final class PairedDeviceTests: XCTestCase {
             device.ownIndexReply = row.ownIndexReply
             device.pairedCountReply = row.countReply
             device.pairedEntryReplies = row.entryReplies
+            device.pairedGaps = row.gaps
             device.rejects = row.rejects
-            let (controller, _) = await connected(device)
+            let (controller, _) = await connectedController(device)
             XCTAssertEqual(Self.describe(controller.state.pairedDevices), row.shown, row.name)
+        }
+    }
+
+    func testAGapKeepsEachDeviceOnItsOwnIndex() async {
+        for row in Self.listRows {
+            guard let want = row.indexes else { continue }
+            let device = FakeHeadset()
+            device.paired = row.paired
+            device.ownIndex = row.ownIndex
+            device.pairedGaps = row.gaps
+            let (controller, _) = await connectedController(device)
+            XCTAssertEqual(controller.state.pairedDevices?.map(\.index), want, row.name)
         }
     }
 
@@ -218,19 +248,19 @@ final class PairedDeviceTests: XCTestCase {
             let device = FakeHeadset()
             if let reply { device.maxConnectionsReply = reply }
             if rejected { device.rejects = [Cmd.getMaxConnections] }
-            let (controller, _) = await connected(device)
+            let (controller, _) = await connectedController(device)
             XCTAssertEqual(controller.state.maxConnections, limit, name)
         }
     }
 
     func testConnectSubscribesToPairedDevicePushes() async {
-        let (_, fake) = await connected(FakeHeadset())
+        let (_, fake) = await connectedController(FakeHeadset())
         XCTAssertTrue(fake.sent.contains(GaiaFrame(command: Cmd.registerNotification,
                                                    payload: [Cmd.Feature.deviceManagement])))
     }
 
     func testDisconnectForgetsTheList() async {
-        let (controller, fake) = await connected(FakeHeadset())
+        let (controller, fake) = await connectedController(FakeHeadset())
         XCTAssertNotNil(controller.state.pairedDevices, "read before the drop")
         XCTAssertNotNil(controller.state.maxConnections, "read before the drop")
         fake.drop()
@@ -278,7 +308,7 @@ final class PairedDeviceTests: XCTestCase {
             let device = FakeHeadset()
             device.paired = row.before
             if !row.listKnown { device.pairedCountReply = [] }
-            let (controller, fake) = await connected(device)
+            let (controller, fake) = await connectedController(device)
             device.paired = row.after
             device.ownIndex = row.ownAfter
             device.pairedCountReply = nil
@@ -298,7 +328,7 @@ final class PairedDeviceTests: XCTestCase {
     func testAnOlderReadNeverReplacesANewerOne() async {
         let device = FakeHeadset()
         device.paired = [("MacBook", true), ("iPhone", false), ("iPad", false), ("PC", false)]
-        let (controller, fake) = await connected(device)
+        let (controller, fake) = await connectedController(device)
         device.pairedEntryDelays = Dictionary(uniqueKeysWithValues: (0..<4).map { ($0, .milliseconds(30)) })
         let entryOne = { fake.sent.filter { $0.command == Cmd.getPairedDevice && $0.payload == [1] }.count }
         let before = entryOne()   // the read made on connect
@@ -319,7 +349,7 @@ final class PairedDeviceTests: XCTestCase {
     func testAReadThatOutlivesTheLinkShowsNothing() async {
         let device = FakeHeadset()
         let armed = Box(false)
-        let (controller, _) = await connected(device) { frame, fake in
+        let (controller, _) = await connectedController(device) { frame, fake in
             guard armed.value, frame.command == Cmd.getPairedDevice, frame.payload == [1] else { return nil }
             // The reply first, then the drop, before the read resumes.
             let replies = device.respond(frame, push: { fake.push($0) })
@@ -445,7 +475,7 @@ final class PairedDeviceTests: XCTestCase {
         device.pollsToConnect = row.pollsToConnect
         device.pushesDuringConnect = row.pushes
         let listReads = Box(-1)   // the connect's own read is read 0
-        let (controller, fake) = await connected(device) { frame, fake in
+        let (controller, fake) = await connectedController(device) { frame, fake in
             if row.dropOnPoll, frame.command == Cmd.getPairedDeviceStatus {
                 fake.drop()
                 return []
@@ -526,7 +556,7 @@ final class PairedDeviceTests: XCTestCase {
         let device = FakeHeadset()
         let seen = Box<PairedAction?>(nil)
         let owner = Box<HeadphoneController?>(nil)
-        let (controller, _) = await connected(device) { frame, _ in
+        let (controller, _) = await connectedController(device) { frame, _ in
             if frame.command == Cmd.connectPairedDevice { seen.value = owner.value?.state.pairedAction }
             return nil
         }
@@ -578,7 +608,7 @@ final class PairedDeviceTests: XCTestCase {
         for (name, firmware, reachesWire) in rows {
             let device = FakeHeadset()
             device.firmware = firmware
-            let (controller, fake) = await connected(device)
+            let (controller, fake) = await connectedController(device)
             _ = try? await controller.request(Cmd.disconnectPairedDevice, payload: [1], timeout: .milliseconds(200))
             XCTAssertEqual(fake.sent.contains { $0.command == Cmd.disconnectPairedDevice }, reachesWire, name)
         }
@@ -634,7 +664,7 @@ final class PairedDeviceTests: XCTestCase {
         device.ownIndex = row.ownIndex
         device.firmware = row.firmware
         device.pollsToConnect = row.pollsToDisconnect
-        let (controller, fake) = await connected(device)
+        let (controller, fake) = await connectedController(device)
         row.changeBeforeClick?(device)
         device.rejects = row.rejects
         await controller.disconnect(row.target)
@@ -671,7 +701,7 @@ final class PairedDeviceTests: XCTestCase {
         for firmware: [Int]? in [[3, 38, 3], [2, 13, 42], nil] {
             let device = FakeHeadset()
             device.firmware = firmware
-            let (controller, fake) = await connected(device)
+            let (controller, fake) = await connectedController(device)
             await controller.disconnect(PairedDevice(index: 0, name: "MacBook", isConnected: true, isThisMac: true))
             XCTAssertTrue(controller.state.releasedByUser, "\(String(describing: firmware))")
             XCTAssertFalse(fake.sent.contains { $0.command == Cmd.disconnectPairedDevice })
@@ -683,7 +713,7 @@ final class PairedDeviceTests: XCTestCase {
     func testOverlappingConnectsSendOne() async {
         let device = FakeHeadset()
         device.pollsToConnect = 3
-        let (controller, _) = await connected(device)
+        let (controller, _) = await connectedController(device)
         let target = PairedDevice(index: 1, name: "iPhone", isConnected: false, isThisMac: false)
         let first = Task { await controller.connect(to: target) }
         let second = Task { await controller.connect(to: target) }

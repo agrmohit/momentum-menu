@@ -105,7 +105,7 @@ GAIA v3 frames start `FF 03 00 LL`, then the vendor (`0x0495`) and the command i
 | Sample rate | `0x089A` push | u32 big-endian Hz. Covers whichever device is streaming. |
 | Noise mode table | `0x1A00` | Adaptive is written as an `[id, value]` pair, or the whole table where the pair is rejected; anti-wind always as the whole table. A write can reset the level, so the app skips no-op writes and reads the level back after the rest. |
 | EQ and bass boost | `0x10xx` | Firmware 3.x only; 2.x rejects them with `0x05`. |
-| Paired devices | `0x1400`-`0x1409`, `0x1484` push | Count, own index, limit (2), then `[index, priority, connected, name, 00]` per index. Addressed by index only, and indexes can reorder, so the list is re-read before any connect (`0x1402`) or disconnect (`0x1403`). |
+| Paired devices | `0x1400`-`0x1409`, `0x1484` push | Count, own index, limit (2), then `[index, priority, connected, name, 00]` per index. Addressed by index only, and indexes can reorder, so the list is re-read before any connect (`0x1402`) or disconnect (`0x1403`). A slot a forget emptied answers `FF FF FF 00` and is left out of the count, so the read goes on past it. |
 
 Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 

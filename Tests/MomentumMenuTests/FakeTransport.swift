@@ -124,6 +124,9 @@ final class FakeHeadset {
     var pairedCountReply: [UInt8]?
     /// Replaces the entry reply for an index, to model a misread.
     var pairedEntryReplies: [Int: [UInt8]] = [:]
+    /// Empty slots by index. The count leaves them out, and an entry read
+    /// answers OK `[FF FF FF 00]`, as captured after a forget on FW 3.38.3.
+    var pairedGaps: Set<Int> = []
     /// How long an entry read takes to answer, by index; immediate otherwise.
     var pairedEntryDelays: [Int: Duration] = [:]
     /// Replaces every status reply, to model a misread.
@@ -185,7 +188,7 @@ final class FakeHeadset {
         case Cmd.getCodec: return [Reply.ok(frame.command, [codec])]
         case Cmd.setBandGain: bands[Int(value)] = frame.payload[1]
         case Cmd.getPairedDeviceCount:
-            return [Reply.ok(frame.command, pairedCountReply ?? [0, UInt8(paired.count)])]
+            return [Reply.ok(frame.command, pairedCountReply ?? [0, UInt8(paired.count - pairedGaps.count)])]
         case Cmd.getOwnDeviceIndex: return [Reply.ok(frame.command, ownIndexReply ?? [ownIndex])]
         case Cmd.getMaxConnections: return [Reply.ok(frame.command, maxConnectionsReply ?? [maxConnections])]
         case Cmd.getPairedDevice:
@@ -193,6 +196,8 @@ final class FakeHeadset {
             let reply: GaiaFrame
             if let canned = pairedEntryReplies[index] {
                 reply = Reply.ok(frame.command, canned)
+            } else if pairedGaps.contains(index) {
+                reply = Reply.ok(frame.command, [0xFF, 0xFF, 0xFF, 0x00])
             } else if index < paired.count {
                 let entry = paired[index]
                 // Priority equals the index in every capture; offset here so
@@ -302,4 +307,30 @@ enum Reply {
             }
         }
     }
+}
+
+/// A controller connected to `device`, with short poll intervals and a
+/// deadline only rows that never finish wait for. `wrap` answers a frame
+/// instead of the device when it returns replies.
+@MainActor
+func connectedController(_ device: FakeHeadset, wrap: ((GaiaFrame, FakeTransport) -> [GaiaFrame]?)? = nil)
+    async -> (HeadphoneController, FakeTransport) {
+    let fake = FakeTransport()
+    fake.respond = { [weak fake] frame in
+        guard let fake else { return [] }
+        if let replies = wrap?(frame, fake) { return replies }
+        return device.respond(frame, push: { fake.push($0) })
+    }
+    let controller = HeadphoneController(transport: fake)
+    controller.peerPollInterval = .milliseconds(5)
+    controller.peerConnectTimeout = .milliseconds(500)
+    await controller.connect()
+    return (controller, fake)
+}
+
+/// Waits for a condition instead of a fixed sleep, up to a limit.
+@MainActor
+func settle(within limit: Duration = .seconds(2), until done: () -> Bool) async {
+    let deadline = ContinuousClock.now + limit
+    while !done(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
 }

@@ -995,8 +995,11 @@ public final class HeadphoneController: ObservableObject {
         return list
     }
 
-    /// Count, own index and limit, then one entry per index. Any entry that
-    /// fails fails the whole list: a list with a gap would shift names.
+    /// Count, own index and limit, then entries until `count` are found.
+    ///
+    /// A forget leaves an empty slot that answers `[FF FF FF 00]` and is left
+    /// out of the count (FW 3.38.3), so the read goes on past it. Devices
+    /// keep the headphones' index. Any other failure fails the whole list.
     private func readPairedDevices() async -> (devices: [PairedDevice], max: Int?)? {
         guard let countReply = try? await request(Cmd.getPairedDeviceCount), countReply.count == 2 else {
             return nil
@@ -1005,19 +1008,20 @@ public final class HeadphoneController: ObservableObject {
         let own = Self.singleByte(try? await request(Cmd.getOwnDeviceIndex))
         let max = Self.singleByte(try? await request(Cmd.getMaxConnections))
 
-        var entries: [(name: String, connected: Bool)] = []
-        for index in 0..<count {
-            guard let reply = try? await request(Cmd.getPairedDevice, payload: [UInt8(index)]),
-                  let entry = Self.pairedEntry(reply, index: index) else { return nil }
-            entries.append(entry)
-        }
-        // Trusted only on a connected slot, since this Mac is connected.
-        // omarchy-momentum4 reads 0x1407 as a restart flag; a wrong guess
-        // here must not label a phone as this Mac.
-        let thisMac = own.flatMap { $0 < entries.count && entries[$0].connected ? $0 : nil }
-        let devices = entries.enumerated().map {
-            PairedDevice(index: $0.offset, name: $0.element.name,
-                         isConnected: $0.element.connected, isThisMac: $0.offset == thisMac)
+        var devices: [PairedDevice] = []
+        var index = 0
+        while devices.count < count {
+            guard index < Cmd.maxPairedDevices,
+                  let reply = try? await request(Cmd.getPairedDevice, payload: [UInt8(index)]) else { return nil }
+            if reply != Cmd.emptyPairedSlot {
+                guard let entry = Self.pairedEntry(reply, index: index) else { return nil }
+                // The own index is trusted only on a connected slot, since
+                // this Mac is connected: omarchy-momentum4 reads 0x1407 as a
+                // restart flag, and a wrong guess must not label a phone.
+                devices.append(PairedDevice(index: index, name: entry.name, isConnected: entry.connected,
+                                            isThisMac: index == own && entry.connected))
+            }
+            index += 1
         }
         return (devices, max)
     }
