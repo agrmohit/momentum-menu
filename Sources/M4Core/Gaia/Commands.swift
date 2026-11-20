@@ -129,6 +129,9 @@ enum Cmd {
     static let getPairedDeviceCount: UInt16 = 0x1400
     /// -> [index] ; <- [index, priority, connected 0/1, name..., 00]
     static let getPairedDevice: UInt16 = 0x1401
+    /// The 0x1401 reply for a slot a forget emptied (FW 3.38.3). The count
+    /// leaves such slots out.
+    static let emptyPairedSlot: [UInt8] = [0xFF, 0xFF, 0xFF, 0x00]
     /// -> [index] ; <- empty OK at once, before the link is up.
     static let connectPairedDevice: UInt16 = 0x1402
     /// -> [index] ; <- empty OK. Disconnects and keeps the pairing on
