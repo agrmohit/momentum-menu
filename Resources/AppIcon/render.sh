@@ -1,7 +1,8 @@
 #!/bin/bash
 # Renders the icons in artwork.js into Starfield.icns, Sleepy.icns and Ghost.icns next to
-# this script. Run it after changing artwork.js, and commit the .icns files:
-# the build only copies them, so it needs neither Chrome nor oxipng.
+# this script, and a 512 px PNG of each into docs/app-icons for the README. Run it
+# after changing artwork.js, and commit both: the build only copies the .icns
+# files, so it needs neither Chrome nor oxipng.
 #
 # Needs Google Chrome (headless, to draw the SVG at each exact size) and
 # oxipng (`brew install oxipng`, to shrink the PNGs losslessly).
@@ -27,32 +28,41 @@ icon_128x128:128:large icon_128x128@2x:256:large
 icon_256x256:256:large icon_256x256@2x:512:large
 icon_512x512:512:large icon_512x512@2x:1024:large"
 
+# render ID ART SHAPE PX OUT draws one icon at PX pixels into OUT.
+render() {
+    local id=$1 art=$2 shape=$3 px=$4 out=$5
+    # A fixed 1024 window, cropped to the icon: see render.html for why.
+    # Chrome logs harmless task-policy errors on macOS, and its exit status
+    # is ignored: the checks below decide success, and say what failed.
+    "$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+        --default-background-color=00000000 --window-size=1024,1024 \
+        --screenshot="$out" \
+        "file://$PWD/render.html?id=$id&art=$art&shape=$shape&px=$px" 2>/dev/null || true
+    [ -f "$out" ] || { echo "render failed: Chrome wrote no $out"; exit 1; }
+    sips --cropToHeightWidth "$px" "$px" "$out" >/dev/null
+    [ "$(sips -g pixelWidth "$out" | awk '/pixelWidth/ { print $2 }')" = "$px" ] ||
+        { echo "render failed: $out"; exit 1; }
+}
+
+mkdir "$WORK/docs"
 for icon in $ICONS; do
     id="${icon%%:*}"
     shape="${icon##*:}"
-    set="$WORK/$id.iconset"
-    mkdir "$set"
+    mkdir "$WORK/$id.iconset"
     for slot in $SLOTS; do
         IFS=: read -r name px art <<< "$slot"
-        # A fixed 1024 window, cropped to the icon: see render.html for why.
-        # Chrome logs harmless task-policy errors on macOS, and its exit status
-        # is ignored: the checks below decide success, and say what failed.
-        "$CHROME" --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
-            --default-background-color=00000000 --window-size=1024,1024 \
-            --screenshot="$set/$name.png" \
-            "file://$PWD/render.html?id=$id&art=$art&shape=$shape&px=$px" 2>/dev/null || true
-        [ -f "$set/$name.png" ] || { echo "render failed: Chrome wrote no $set/$name.png"; exit 1; }
-        sips --cropToHeightWidth "$px" "$px" "$set/$name.png" >/dev/null
-        [ "$(sips -g pixelWidth "$set/$name.png" | awk '/pixelWidth/ { print $2 }')" = "$px" ] ||
-            { echo "render failed: $set/$name.png"; exit 1; }
+        render "$id" "$art" "$shape" "$px" "$WORK/$id.iconset/$name.png"
     done
+    # The README shows every icon as a squircle: unlike the Dock, GitHub does
+    # not mask the full-bleed one.
+    render "$id" large squircle 512 "$WORK/docs/$(echo "$id" | tr '[:upper:]' '[:lower:]').png"
 done
 
-oxipng --opt max --strip safe --alpha --quiet "$WORK"/*.iconset/*.png
+oxipng --opt max --strip safe --alpha --quiet "$WORK"/*.iconset/*.png "$WORK"/docs/*.png
 
 # A blank render has the right size but compresses to about 100 bytes; the
 # smallest real one, 16 px, is over 400.
-for png in "$WORK"/*.iconset/*.png; do
+for png in "$WORK"/*.iconset/*.png "$WORK"/docs/*.png; do
     [ "$(stat -f %z "$png")" -gt 300 ] || { echo "blank render: $png"; exit 1; }
 done
 
@@ -60,4 +70,7 @@ for icon in $ICONS; do
     id="${icon%%:*}"
     swift pack-icns.swift "$WORK/$id.iconset" "$id.icns"
 done
-ls -l ./*.icns
+DOCS=../../docs/app-icons
+mkdir -p "$DOCS"
+cp "$WORK"/docs/*.png "$DOCS"/
+ls -l ./*.icns "$DOCS"/*.png
