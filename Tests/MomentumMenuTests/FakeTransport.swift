@@ -139,6 +139,19 @@ final class FakeHeadset {
     var pushesDuringConnect = false
     /// Every index a connect was sent for.
     private(set) var connects: [Int] = []
+    /// What a forget (0x1405) does to the list. FW 3.38.3 was captured
+    /// leaving a gap; closing up and an OK that changes nothing stay
+    /// covered, since other firmware or a restart may differ.
+    enum ForgetEffect { case leavesGap, closesUp, nothing }
+    var forgetEffect = ForgetEffect.leavesGap
+    /// Count reads a forget makes the device reject, as for the firmware bug
+    /// Sennheiser's app names; `.max` for all of them.
+    var countRejectsAfterForget = 0
+    private var countRejectsLeft = 0
+    /// Every index a forget was sent for.
+    private(set) var forgets: [Int] = []
+    /// Runs as a forget arrives, before it is answered.
+    var onForget: ((FakeHeadset) -> Void)?
     /// Firmware as `0x1201` answers it; nil leaves it unanswered.
     var firmware: [Int]?
     /// The link change under way: the state it ends in, after so many polls.
@@ -188,6 +201,10 @@ final class FakeHeadset {
         case Cmd.getCodec: return [Reply.ok(frame.command, [codec])]
         case Cmd.setBandGain: bands[Int(value)] = frame.payload[1]
         case Cmd.getPairedDeviceCount:
+            if countRejectsLeft > 0 {
+                countRejectsLeft -= 1
+                return [Reply.rejected(frame.command)]
+            }
             return [Reply.ok(frame.command, pairedCountReply ?? [0, UInt8(paired.count - pairedGaps.count)])]
         case Cmd.getOwnDeviceIndex: return [Reply.ok(frame.command, ownIndexReply ?? [ownIndex])]
         case Cmd.getMaxConnections: return [Reply.ok(frame.command, maxConnectionsReply ?? [maxConnections])]
@@ -216,6 +233,25 @@ final class FakeHeadset {
         case Cmd.getFirmwareVersion:
             guard let firmware else { return Reply.device(battery: 50)(frame) }
             return [Reply.ok(frame.command, firmware.flatMap { [UInt8($0 >> 8), UInt8($0 & 0xFF)] })]
+        case Cmd.forgetPairedDevice:
+            let index = Int(value)
+            forgets.append(index)
+            countRejectsLeft = countRejectsAfterForget
+            onForget?(self)
+            guard index < paired.count, !pairedGaps.contains(index) else { return [Reply.rejected(frame.command)] }
+            switch forgetEffect {
+            case .leavesGap:
+                pairedGaps.insert(index)
+                // Captured about a second later: the slot's status is FF.
+                let gone = Reply.notification(Cmd.getPairedDeviceStatus, [value, 0xFF])
+                Task { @MainActor in push(gone) }
+            case .closesUp:
+                paired.remove(at: index)
+                if Int(ownIndex) > index { ownIndex -= 1 }
+            case .nothing: break
+            }
+            // Captured as `[00]`, not the index Smart Control's model names.
+            return [Reply.ok(frame.command, [0])]
         case Cmd.disconnectPairedDevice:
             guard Int(value) < paired.count else { return [Reply.rejected(frame.command)] }
             pendingConnect = (Int(value), pollsToConnect, false)
@@ -323,6 +359,7 @@ func connectedController(_ device: FakeHeadset, wrap: ((GaiaFrame, FakeTransport
     }
     let controller = HeadphoneController(transport: fake)
     controller.peerPollInterval = .milliseconds(5)
+    controller.forgetPollInterval = .milliseconds(5)
     controller.peerConnectTimeout = .milliseconds(500)
     await controller.connect()
     return (controller, fake)

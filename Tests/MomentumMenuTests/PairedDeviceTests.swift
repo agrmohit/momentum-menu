@@ -88,6 +88,8 @@ final class PairedDeviceTests: XCTestCase {
              [0xFF, 0x03, 0x00, 0x01, 0x04, 0x95, 0x14, 0x02, 0x02]),
             ("disconnect 3", GaiaFrame(command: Cmd.disconnectPairedDevice, payload: [3]),
              [0xFF, 0x03, 0x00, 0x01, 0x04, 0x95, 0x14, 0x03, 0x03]),
+            ("forget 2, as sent live", GaiaFrame(command: Cmd.forgetPairedDevice, payload: [2]),
+             [0xFF, 0x03, 0x00, 0x01, 0x04, 0x95, 0x14, 0x05, 0x02]),
             ("status 2", GaiaFrame(command: Cmd.getPairedDeviceStatus, payload: [2]),
              [0xFF, 0x03, 0x00, 0x01, 0x04, 0x95, 0x14, 0x04, 0x02]),
             ("own index", GaiaFrame(command: Cmd.getOwnDeviceIndex, payload: []),
@@ -442,6 +444,10 @@ final class PairedDeviceTests: XCTestCase {
         ConnectRow(name: "two devices share the name",
                    paired: [("MacBook", true), ("iPhone", false), ("iPhone", false)],
                    sendsConnect: false, showsError: true),
+        // Shared names are refused before "already connected" is judged.
+        ConnectRow(name: "shared name, already connected",
+                   paired: [("MacBook", true), ("iPhone", true), ("iPhone", false)],
+                   sendsConnect: false, showsError: true),
         ConnectRow(name: "shares this Mac's name",
                    paired: [("MacBook", true), ("MacBook", false)],
                    target: PairedDevice(index: 1, name: "MacBook", isConnected: false, isThisMac: false),
@@ -606,7 +612,7 @@ final class PairedDeviceTests: XCTestCase {
             ("2.13.42", [2, 13, 42], false),
             ("unknown", nil, false),
         ]
-        for command in [Cmd.disconnectPairedDevice] {
+        for command in [Cmd.disconnectPairedDevice, Cmd.forgetPairedDevice] {
             for (name, firmware, reachesWire) in rows {
                 let device = FakeHeadset()
                 device.firmware = firmware
@@ -654,6 +660,9 @@ final class PairedDeviceTests: XCTestCase {
                       sendsDisconnect: false, showsError: true),
         DisconnectRow(name: "two devices share the name",
                       paired: [("MacBook", true), ("iPhone", true), ("iPhone", false)],
+                      sendsDisconnect: false, showsError: true),
+        DisconnectRow(name: "shared name, already disconnected",
+                      paired: [("MacBook", true), ("iPhone", false), ("iPhone", false)],
                       sendsDisconnect: false, showsError: true),
         // Its own slot must never take 0x1403: it cannot be told apart.
         DisconnectRow(name: "this Mac not identified", ownIndex: 5, sendsDisconnect: false, showsError: true),

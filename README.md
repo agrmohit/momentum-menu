@@ -106,13 +106,14 @@ GAIA v3 frames start `FF 03 00 LL`, then the vendor (`0x0495`) and the command i
 | Sample rate | `0x089A` push | u32 big-endian Hz. Covers whichever device is streaming. |
 | Noise mode table | `0x1A00` | Adaptive is written as an `[id, value]` pair, or the whole table where the pair is rejected; anti-wind always as the whole table. A write can reset the level, so the app skips no-op writes and reads the level back after the rest. |
 | EQ and bass boost | `0x10xx` | Firmware 3.x only; 2.x rejects them with `0x05`. |
-| Paired devices | `0x1400`-`0x1409`, `0x1484` push | Count, own index, limit (2), then `[index, priority, connected, name, 00]` per index. Addressed by index only, and indexes can reorder, so the list is re-read before any connect (`0x1402`) or disconnect (`0x1403`). A slot a forget emptied answers `FF FF FF 00` and is left out of the count, so the read goes on past it. |
+| Paired devices | `0x1400`-`0x1409`, `0x1484` push | Count, own index, limit (2), then `[index, priority, connected, name, 00]` per index. Addressed by index only, and indexes can reorder, so the list is re-read before any connect (`0x1402`), disconnect (`0x1403`) or forget (`0x1405`). A slot a forget emptied answers `FF FF FF 00` and is left out of the count, so the read goes on past it. |
 
 Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 
 - An allow-list of every id the app sends, with exact payload rules. Anything else is refused before it reaches the radio.
 - A deny-list underneath: `0x0607`, `0x0613` and `0x0685` drop the link. `0x0801`, `0x0805` and `0x0817` are setters the app does not use.
-- `0x1403` disconnects a paired device on firmware 3.38.3 but erased a pairing on 2.13.42. The pairing commands can change meaning between firmware versions, so `0x1403` is sent only on 3.38.3, the version it was tested on. The deletes `0x1405` and `0x1406` are never sent.
+- `0x1403` disconnects a paired device on firmware 3.38.3 but erased a pairing on 2.13.42. The pairing commands can change meaning between firmware versions, so `0x1403` and `0x1405` are sent only on 3.38.3, the version they were tested on.
+- `0x1405` forgets one paired device that is not connected. On 3.38.3 it answers `00` and leaves an empty slot that answers `FF FF FF 00` and drops out of the count; a restart closes the gap. The list is re-read until the name is gone. `0x1406` deletes every pairing and is never sent.
 - Frames for any vendor other than `0x0495` are refused.
 - Never sweep id ranges against real headphones.
 
@@ -122,6 +123,8 @@ Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 - [DanSmith888/omarchy-momentum4](https://github.com/DanSmith888/omarchy-momentum4): `PROTOCOL.md`, the presets and the hazard list.
 - [gjabell/momentumctl](https://github.com/gjabell/momentumctl): frame format and the captured test vectors.
 - [Ariazonaa/momentum-control](https://github.com/Ariazonaa/momentum-control) (was `momentum4-control`): the GAIA SDP service UUID, EQ payloads, and the multipoint commands and captures.
+- [xndbogdan/sennheiser-control](https://github.com/xndbogdan/sennheiser-control): the device model from Smart Control, including the forget command `0x1405`.
+- [kunalagra/OtoControl](https://github.com/kunalagra/OtoControl): Smart Control Plus's notes on gaps left by a forget.
 - [stefanfmeyer/smart-connect-bt-audio](https://github.com/stefanfmeyer/smart-connect-bt-audio): GAIA over BLE and cross-checked ids.
 
 Not affiliated with Sennheiser or Sonova.

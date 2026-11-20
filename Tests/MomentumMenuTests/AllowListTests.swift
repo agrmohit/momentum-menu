@@ -4,7 +4,7 @@ import XCTest
 /// Which frames may leave the Mac at all.
 ///
 /// Regression: safety was a deny-list. Community catalogues name factory reset
-/// (0x0040), firmware upgrade (0x0200), pairing deletes (0x1405, 0x1406) and
+/// (0x0040), firmware upgrade (0x0200), deleting every pairing (0x1406) and
 /// MMI reset (0x1604), none of which it blocked.
 final class AllowListTests: XCTestCase {
 
@@ -121,13 +121,20 @@ final class AllowListTests: XCTestCase {
         Row(name: "disconnect, index 16", command: Cmd.disconnectPairedDevice, payload: [16], allowed: false),
         Row(name: "disconnect without an index", command: 0x1403, payload: [], allowed: false),
         Row(name: "disconnect with two bytes", command: 0x1403, payload: [1, 0], allowed: false),
+        // Forget too; its firmware and not-connected gates live in the
+        // controller (ForgetDeviceTests).
+        Row(name: "forget, first", command: 0x1405, payload: [0], allowed: true),
+        Row(name: "forget, last", command: 0x1405, payload: [15], allowed: true),
+        Row(name: "forget, index 16", command: 0x1405, payload: [16], allowed: false),
+        Row(name: "forget without an index", command: 0x1405, payload: [], allowed: false),
+        Row(name: "forget with two bytes", command: 0x1405, payload: [1, 0], allowed: false),
         Row(name: "0x1408, between the reads", command: 0x1408, payload: [], allowed: false),
         Row(name: "0x140B, unknown", command: 0x140B, payload: [], allowed: false),
         // Documented elsewhere as dangerous; never sent by the app.
         Row(name: "factory reset", command: 0x0040, payload: [], allowed: false),
         Row(name: "firmware upgrade enable", command: 0x0200, payload: [], allowed: false),
-        Row(name: "delete a paired device", command: 0x1405, payload: [0], allowed: false),
         Row(name: "delete the pairing list", command: 0x1406, payload: [], allowed: false),
+        Row(name: "delete the pairing list with an index", command: 0x1406, payload: [0], allowed: false),
         Row(name: "reset button mapping", command: 0x1604, payload: [], allowed: false),
         Row(name: "link-killing id from the sweeps", command: 0x0607, payload: [], allowed: false),
         Row(name: "charger getter in the power group", command: 0x0602, payload: [], allowed: false),
