@@ -291,7 +291,7 @@ public struct DeviceState: Sendable {
         return devices.filter(\.isConnected).count >= max
     }
 
-    /// 0x1403 only disconnects from FW 3.38.3 (momentum4-control captures);
+    /// 0x1403 only disconnects from FW 3.38.3 (Ariazonaa/momentum-control captures);
     /// on 2.13.42 it erased a pairing, and nothing between was tested.
     public var canDisconnectOthers: Bool {
         guard let version = firmwareVersion else { return false }

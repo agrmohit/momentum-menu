@@ -3,7 +3,7 @@ import XCTest
 
 /// The headphones' paired devices (0x1400-0x1409), and connecting one (0x1402).
 ///
-/// Reply layouts are from momentum4-control's captures on FW 3.37.3 and
+/// Reply layouts are from Ariazonaa/momentum-control's captures on FW 3.37.3 and
 /// 3.38.3: an entry is `[index, priority, connected, name..., 00]`.
 @MainActor
 final class PairedDeviceTests: XCTestCase {
@@ -100,7 +100,7 @@ final class PairedDeviceTests: XCTestCase {
 
     // MARK: - Wire bytes
 
-    /// Frames as momentum4-control captured them, so a typo in an id fails.
+    /// Frames as Ariazonaa/momentum-control captured them, so a typo in an id fails.
     func testFramesMatchTheCaptures() {
         let rows: [(String, GaiaFrame, [UInt8])] = [
             ("count", GaiaFrame(command: Cmd.getPairedDeviceCount, payload: []),

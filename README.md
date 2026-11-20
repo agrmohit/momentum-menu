@@ -120,7 +120,7 @@ Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 - [andr3-santos/momentum-menu](https://github.com/andr3-santos/momentum-menu): the repo this is forked from.
 - [DanSmith888/omarchy-momentum4](https://github.com/DanSmith888/omarchy-momentum4): `PROTOCOL.md`, the presets and the hazard list.
 - [gjabell/momentumctl](https://github.com/gjabell/momentumctl): frame format and the captured test vectors.
-- [Tumult1337/momentum4-control](https://github.com/Tumult1337/momentum4-control): the GAIA SDP service UUID, EQ payloads, and the multipoint commands and captures.
+- [Ariazonaa/momentum-control](https://github.com/Ariazonaa/momentum-control) (was `momentum4-control`): the GAIA SDP service UUID, EQ payloads, and the multipoint commands and captures.
 - [stefanfmeyer/smart-connect-bt-audio](https://github.com/stefanfmeyer/smart-connect-bt-audio): GAIA over BLE and cross-checked ids.
 
 Not affiliated with Sennheiser or Sonova.
