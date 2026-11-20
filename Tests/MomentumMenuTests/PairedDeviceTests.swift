@@ -577,12 +577,13 @@ final class PairedDeviceTests: XCTestCase {
 
     // MARK: - Disconnecting
 
-    func testDisconnectNeedsFirmware3383OrNewer() {
+    func testPairingChangesNeedFirmware3383Exactly() {
         let rows: [(String, [Int]?, Bool)] = [
             ("3.38.3, the captured one", [3, 38, 3], true),
-            ("3.38.4", [3, 38, 4], true),
-            ("3.40.0", [3, 40, 0], true),
-            ("4.0.0", [4, 0, 0], true),
+            ("3.38.3 with a fourth part", [3, 38, 3, 0], false),
+            ("3.38.4", [3, 38, 4], false),
+            ("3.40.0", [3, 40, 0], false),
+            ("4.0.0", [4, 0, 0], false),
             ("3.38.2", [3, 38, 2], false),
             ("3.37.3, never tested", [3, 37, 3], false),
             ("2.13.42, erased a pairing", [2, 13, 42], false),
@@ -591,26 +592,29 @@ final class PairedDeviceTests: XCTestCase {
         for (name, version, allowed) in rows {
             var state = DeviceState()
             state.firmwareVersion = version
-            XCTAssertEqual(state.canDisconnectOthers, allowed, name)
+            XCTAssertEqual(state.canChangePairings, allowed, name)
         }
     }
 
     /// The firmware rule holds at the one place every frame passes, not
     /// only in `disconnect(_:)`: a direct request is refused too.
-    func testARawDisconnectIsRefusedOnOlderFirmware() async {
+    func testARawPairingChangeIsRefusedOffTheTestedFirmware() async {
         let rows: [(String, [Int]?, Bool)] = [
             ("3.38.3", [3, 38, 3], true),
-            ("3.41.0", [3, 41, 0], true),
+            ("3.41.0", [3, 41, 0], false),
             ("3.37.3", [3, 37, 3], false),
             ("2.13.42", [2, 13, 42], false),
             ("unknown", nil, false),
         ]
-        for (name, firmware, reachesWire) in rows {
-            let device = FakeHeadset()
-            device.firmware = firmware
-            let (controller, fake) = await connectedController(device)
-            _ = try? await controller.request(Cmd.disconnectPairedDevice, payload: [1], timeout: .milliseconds(200))
-            XCTAssertEqual(fake.sent.contains { $0.command == Cmd.disconnectPairedDevice }, reachesWire, name)
+        for command in [Cmd.disconnectPairedDevice] {
+            for (name, firmware, reachesWire) in rows {
+                let device = FakeHeadset()
+                device.firmware = firmware
+                let (controller, fake) = await connectedController(device)
+                _ = try? await controller.request(command, payload: [1], timeout: .milliseconds(200))
+                XCTAssertEqual(fake.sent.contains { $0.command == command }, reachesWire,
+                               String(format: "0x%04X on %@", command, name))
+            }
         }
     }
 
@@ -631,7 +635,9 @@ final class PairedDeviceTests: XCTestCase {
         DisconnectRow(name: "phone disconnects", sendsDisconnect: true, showsError: false),
         DisconnectRow(name: "phone disconnects after a few polls", pollsToDisconnect: 3,
                       sendsDisconnect: true, showsError: false),
-        DisconnectRow(name: "newer firmware", firmware: [3, 40, 1], sendsDisconnect: true, showsError: false),
+        // Only the tested firmware: a newer one may have changed what 0x1403 does.
+        DisconnectRow(name: "newer firmware", firmware: [3, 40, 1], sendsDisconnect: false, showsError: true),
+        DisconnectRow(name: "next patch", firmware: [3, 38, 4], sendsDisconnect: false, showsError: true),
         DisconnectRow(name: "third device of three",
                       paired: [("MacBook", true), ("iPad", false), ("iPhone", true)],
                       target: PairedDevice(index: 2, name: "iPhone", isConnected: true, isThisMac: false),

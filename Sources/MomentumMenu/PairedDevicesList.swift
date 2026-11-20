@@ -19,7 +19,7 @@ struct PairedDevicesList: View {
             if state.connectionSlotsFull, devices.contains(where: { !$0.isConnected }) {
                 Divider()
                 Text("\(state.maxConnections ?? 2) of \(state.maxConnections ?? 2) devices connected. "
-                     + (state.canDisconnectOthers
+                     + (state.canChangePairings
                         ? "Disconnect one to connect another."
                         : "Disconnect one on that device to connect another."))
                     .font(.caption)
@@ -46,7 +46,7 @@ struct PairedDevicesList: View {
             } else if device.isConnected {
                 // Other devices can only be let go on firmware that keeps
                 // their pairing; this Mac can always hand over.
-                let canDisconnect = device.isThisMac || state.canDisconnectOthers
+                let canDisconnect = device.isThisMac || state.canChangePairings
                 StatusPill(label: device.isThisMac ? "This Mac" : "Connected",
                            device: name,
                            canDisconnect: canDisconnect && state.pairedAction == nil) {

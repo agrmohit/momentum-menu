@@ -27,6 +27,30 @@ final class DisconnectStateTests: XCTestCase {
         }
     }
 
+    // MARK: - Firmware
+
+    /// Regression: the firmware stayed after the link ended, so a reconnect
+    /// whose firmware read failed still passed the pairing-change gate.
+    func testNoFirmwareApprovalOutlivesTheLink() async {
+        let endings: [(String, Ending)] = [
+            ("channel drops", .channelDrops),
+            ("channel drops twice", .channelDropsTwice),
+            ("app closes the channel", .appDisconnects),
+            ("user releases the headphones", .userReleases),
+        ]
+        for (name, ending) in endings {
+            let device = FakeHeadset()
+            device.firmware = [3, 38, 3]
+            let (controller, fake) = await connectedController(device)
+            // The positive: approved while this link is up.
+            XCTAssertTrue(controller.state.canChangePairings, "\(name): before")
+            Self.end(ending, fake, controller)
+            XCTAssertNil(controller.state.firmwareVersion, "\(name): version")
+            XCTAssertNil(controller.state.firmware, "\(name): label")
+            XCTAssertFalse(controller.state.canChangePairings, "\(name): after")
+        }
+    }
+
     // MARK: - Battery and charge readings
 
     private struct ReadingRow {

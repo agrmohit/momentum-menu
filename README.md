@@ -111,7 +111,7 @@ Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 
 - An allow-list of every id the app sends, with exact payload rules. Anything else is refused before it reaches the radio.
 - A deny-list underneath: `0x0607`, `0x0613` and `0x0685` drop the link. `0x0801`, `0x0805` and `0x0817` are setters the app does not use.
-- `0x1403` disconnects a paired device on firmware 3.38.3 but erased a pairing on 2.13.42, so it is refused below 3.38.3. The deletes `0x1405` and `0x1406` are never sent.
+- `0x1403` disconnects a paired device on firmware 3.38.3 but erased a pairing on 2.13.42. The pairing commands can change meaning between firmware versions, so `0x1403` is sent only on 3.38.3, the version it was tested on. The deletes `0x1405` and `0x1406` are never sent.
 - Frames for any vendor other than `0x0495` are refused.
 - Never sweep id ranges against real headphones.
 
