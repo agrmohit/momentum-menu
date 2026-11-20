@@ -173,10 +173,11 @@ public struct PairedDevice: Identifiable, Equatable, Sendable {
 public enum PairedAction: Equatable, Sendable {
     case connecting(String)
     case disconnecting(String)
+    case forgetting(String)
 
     public var deviceName: String {
         switch self {
-        case .connecting(let name), .disconnecting(let name): return name
+        case .connecting(let name), .disconnecting(let name), .forgetting(let name): return name
         }
     }
 }
@@ -227,7 +228,7 @@ public struct DeviceState: Sendable {
     public var pairedDevices: [PairedDevice]?
     /// How many devices can be connected at once; 2 on a MOMENTUM 4.
     public var maxConnections: Int?
-    /// The connect or disconnect under way, if any. One at a time.
+    /// The connect, disconnect or forget under way, if any. One at a time.
     public var pairedAction: PairedAction?
 
     /// Plugged in and full. Worth distinguishing: "Charging" at 100% reads as
@@ -277,6 +278,7 @@ public struct DeviceState: Sendable {
         switch pairedAction {
         case .connecting(let name): return "Connecting \(name)"
         case .disconnecting(let name): return "Disconnecting \(name)"
+        case .forgetting(let name): return "Forgetting \(name)"
         case nil: break
         }
         guard let devices = pairedDevices else { return nil }
@@ -291,8 +293,8 @@ public struct DeviceState: Sendable {
         return devices.filter(\.isConnected).count >= max
     }
 
-    /// Disconnect (0x1403) runs only on the firmware it was tested on:
-    /// it erased a pairing on 2.13.42.
+    /// Disconnect (0x1403) and forget (0x1405) run only on the firmware
+    /// they were tested on: 0x1403 erased a pairing on 2.13.42.
     public var canChangePairings: Bool { firmwareVersion == Self.testedPairingFirmware }
 
     static let testedPairingFirmware = [3, 38, 3]
@@ -392,6 +394,8 @@ public final class HeadphoneController: ObservableObject {
     /// Captures show it up 2.9 s after the connect.
     var peerPollInterval: Duration = .milliseconds(300)
     var peerConnectTimeout: Duration = .seconds(8)
+    /// How often a forget re-reads the list; same deadline.
+    var forgetPollInterval: Duration = .milliseconds(500)
 
     public convenience init() {
         self.init(transport: RFCOMMTransport())
@@ -1076,23 +1080,8 @@ public final class HeadphoneController: ObservableObject {
         state.lastError = nil
         let link = links
 
-        guard let before = await loadPairedDevices() else {
-            guard link == links else { return }
-            state.lastError = "Couldn't read the headphones' paired devices."
-            return
-        }
-        guard let target = before.devices.first(where: { $0.index == device.index }),
-              target.name == device.name else {
-            state.lastError = "The paired devices changed. Check the list and try again."
-            return
-        }
+        guard let (target, before) = await currentTarget(device) else { return }
         if target.isThisMac || target.isConnected == connect { return }
-        // Index and name are all the device reports. Two entries with one
-        // name could swap places unseen, and the outcome is judged by name.
-        guard before.devices.filter({ $0.name == device.name }).count == 1 else {
-            state.lastError = "Two paired devices are called \(device.name), so the app can't tell them apart."
-            return
-        }
         guard before.devices.contains(where: \.isThisMac) else {
             state.lastError = "Couldn't tell which paired device is this Mac, so nothing was changed."
             return
@@ -1138,6 +1127,78 @@ public final class HeadphoneController: ObservableObject {
         } else {
             state.lastError = "\(device.name) is still connected."
         }
+    }
+
+    /// Re-reads the list and finds `device` in it by index and name.
+    ///
+    /// Index and name are all the headphones report, and indexes move, so
+    /// a moved device or two devices with one name are refused: the action
+    /// could land on the wrong one. Sets `lastError` and returns nil then.
+    private func currentTarget(_ device: PairedDevice)
+        async -> (target: PairedDevice, list: (devices: [PairedDevice], max: Int?))? {
+        let link = links
+        guard let list = await loadPairedDevices() else {
+            if link == links { state.lastError = "Couldn't read the headphones' paired devices." }
+            return nil
+        }
+        guard let target = list.devices.first(where: { $0.index == device.index }),
+              target.name == device.name else {
+            state.lastError = "The paired devices changed. Check the list and try again."
+            return nil
+        }
+        guard list.devices.filter({ $0.name == device.name }).count == 1 else {
+            state.lastError = "Two paired devices are called \(device.name), so the app can't tell them apart."
+            return nil
+        }
+        return (target, list)
+    }
+
+    /// Erases a paired device that is not connected, so never this Mac.
+    ///
+    /// The reply proves little, so the list is re-read until the name is
+    /// gone or the deadline passes. Returns true once it is gone.
+    @discardableResult
+    public func forget(_ device: PairedDevice) async -> Bool {
+        guard state.connected, state.pairedAction == nil else { return false }
+        state.pairedAction = .forgetting(device.name)
+        defer { state.pairedAction = nil }
+        state.lastError = nil
+        let link = links
+
+        guard let (target, before) = await currentTarget(device) else { return false }
+        guard !target.isConnected else {
+            state.lastError = "Disconnect \(device.name) before forgetting it."
+            return false
+        }
+        // Not only "not connected": this Mac's slot must be seen elsewhere,
+        // so a misread connected flag can never put it in the target's place.
+        guard before.devices.contains(where: \.isThisMac) else {
+            state.lastError = "Couldn't tell which paired device is this Mac, so nothing was changed."
+            return false
+        }
+        do {
+            try await request(Cmd.forgetPairedDevice, payload: [UInt8(device.index)])
+        } catch {
+            if link == links { state.lastError = error.localizedDescription }
+            return false
+        }
+
+        let deadline = ContinuousClock.now + peerConnectTimeout
+        var listRead = false
+        while true {
+            let after = await loadPairedDevices()
+            guard link == links else { return false }
+            if let after {
+                if !after.devices.contains(where: { $0.name == device.name }) { return true }
+                listRead = true
+            }
+            guard ContinuousClock.now < deadline else { break }
+            try? await Task.sleep(for: forgetPollInterval)
+        }
+        state.lastError = listRead
+            ? "The headphones did not forget \(device.name). It is still in their list."
+            : "Couldn't read the paired devices to check that \(device.name) was forgotten."
+        return false
     }
 
     // MARK: - Request plumbing

@@ -140,6 +140,10 @@ enum Cmd {
     static let disconnectPairedDevice: UInt16 = 0x1403
     /// -> [index] ; <- [index, connected 0/1]. Also pushed as 0x1484.
     static let getPairedDeviceStatus: UInt16 = 0x1404
+    /// -> [index] ; <- [00]. Erases that pairing (`DeviceList_DeleteEntry`
+    /// in Smart Control's model). On FW 3.38.3 it leaves an empty slot and
+    /// pushes 0x1484 `[index, FF]`; see `HeadphoneController.forget`.
+    static let forgetPairedDevice: UInt16 = 0x1405
     /// -> [] ; <- [index] of the device asking, i.e. this Mac.
     static let getOwnDeviceIndex: UInt16 = 0x1407
     /// -> [] ; <- [n]. 2 on a MOMENTUM 4.
@@ -166,7 +170,7 @@ enum CommandSafety {
 
     /// Erase or drop a pairing; sent only on the tested firmware
     /// (`DeviceState.canChangePairings`, checked in `HeadphoneController.request`).
-    static let pairingChanges: Set<UInt16> = [Cmd.disconnectPairedDevice]
+    static let pairingChanges: Set<UInt16> = [Cmd.disconnectPairedDevice, Cmd.forgetPairedDevice]
 
     /// The 0x06xx group is power/system space and is known to reset the link
     /// at more ids than the three above. Only battery is allowed out of it.
@@ -189,8 +193,8 @@ enum CommandSafety {
     ///
     /// An allow-list on top of the deny-list above, because community
     /// catalogues name more dangerous ids than any deny-list keeps up with:
-    /// factory reset 0x0040, firmware upgrade 0x0200, pairing deletes 0x1405
-    /// and 0x1406, MMI reset 0x1604. Reads take exactly the payload the app
+    /// factory reset 0x0040, firmware upgrade 0x0200, delete every pairing
+    /// 0x1406, MMI reset 0x1604. Reads take exactly the payload the app
     /// sends: a getter given a byte it does not expect may act as a setter.
     private static let allowed: [UInt16: ([UInt8]) -> Bool] = {
         let flag: ([UInt8]) -> Bool = { $0 == [0] || $0 == [1] }
@@ -218,10 +222,12 @@ enum CommandSafety {
             Cmd.getBandFrequency: { $0.count == 1 && $0[0] < 16 },
             Cmd.getPairedDevice: pairedIndex,
             Cmd.getPairedDeviceStatus: pairedIndex,
-            // The group's two actions; the deletes stay out. Disconnect is
-            // also gated on firmware, which this static list cannot see.
+            // The group's actions; deleting every pairing (0x1406) stays out.
+            // Disconnect and forget are also gated on firmware, which this
+            // static list cannot see.
             Cmd.connectPairedDevice: pairedIndex,
             Cmd.disconnectPairedDevice: pairedIndex,
+            Cmd.forgetPairedDevice: pairedIndex,
         ]
         // Strictly empty. The settings getters sit beside untested setters,
         // and "an id that answers an indexed payload with an empty OK is an
