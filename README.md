@@ -1,6 +1,6 @@
 # Momentum Menu
 
-A macOS menu bar app for the Sennheiser MOMENTUM 4.
+<img src="docs/app-icons/starfield.png" alt="Momentum Menu app icon" width="96" align="right">A menu bar app for the Sennheiser MOMENTUM 4. It does almost everything Smart Control Plus does, right from your Mac, so your phone can stay in your pocket. Needs macOS 26 on Apple silicon.
 
 [![AI Assisted](https://www.aihonestybadge.com/badges/ai-assisted-small.svg)](https://www.aihonestybadge.com)
 [![License](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
@@ -25,27 +25,130 @@ A macOS menu bar app for the Sennheiser MOMENTUM 4.
   </tr>
 </table>
 
+Pick one of three app icons in Settings:
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/app-icons/starfield.png" alt="Starfield app icon" width="96"><br>Starfield</td>
+    <td align="center"><img src="docs/app-icons/sleepy.png" alt="Sleepy app icon" width="96"><br>Sleepy</td>
+    <td align="center"><img src="docs/app-icons/ghost.png" alt="Ghost app icon" width="96"><br>Ghost</td>
+  </tr>
+</table>
+
+## How it behaves
+
+<table>
+  <tr>
+    <td width="50%" valign="top">🎧 <b>Put them on.</b> They connect in about a second, with the battery and codec right there.</td>
+    <td width="50%" valign="top">📱 <b>Switch to your phone.</b> Hand them over, and the app leaves them alone until you ask.</td>
+  </tr>
+  <tr>
+    <td valign="top">📞 <b>Take a call.</b> The call codec shows, and auto-answer and Comfort Calls are a click away.</td>
+    <td valign="top">📶 <b>Bluetooth blips.</b> Off and on within half an hour, and they come back by themselves.</td>
+  </tr>
+  <tr>
+    <td valign="top">🔀 <b>Use two devices.</b> See what else is connected, then connect or disconnect it here.</td>
+    <td valign="top">🧹 <b>Retire an old phone.</b> Right-click it, confirm, and the headphones forget it for good.</td>
+  </tr>
+  <tr>
+    <td valign="top">🔋 <b>Plug in to charge.</b> A softly pulsing bolt fills the battery ring until it says Charged.</td>
+    <td valign="top">🛡️ <b>Get new firmware.</b> Anything that could erase a pairing waits until it is tested.</td>
+  </tr>
+</table>
+
+## All the usual controls
+
+Everything you would change in Smart Control Plus day to day is here too:
+
+- **Noise:** Off, Adaptive or Custom with a level slider, plus anti-wind.
+- **Sound:** Sennheiser's eight equaliser presets, three of our own, five band sliders and Bass Boost.
+- **Headphones:** touch controls, on-head detection, Smart Pause, auto-answer and Comfort Calls.
+- **Devices:** the line under the battery lists your paired devices, and Settings picks an icon for each.
+
+<details>
+<summary><b>🛡️ Built to be trusted</b>: allow-list, model check, tested firmware, verified builds</summary>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">✅ <b>Allow-list.</b> The app only sends commands it knows, with the exact bytes it expects.</td>
+    <td width="50%" valign="top">🎯 <b>Model check.</b> It writes nothing until the headphones confirm they are a MOMENTUM 4.</td>
+  </tr>
+  <tr>
+    <td valign="top">🔬 <b>Tested firmware only.</b> Anything that could erase a pairing runs only on firmware 3.38.3.</td>
+    <td valign="top">🏁 <b>Latest click wins.</b> Click quickly and the headphones still end up where you left them.</td>
+  </tr>
+  <tr>
+    <td valign="top">🔏 <b>Verified builds.</b> Each DMG is built by GitHub Actions, with an attestation you can check.</td>
+    <td valign="top">🧾 <b>Readable crashes.</b> Each release ships the symbols that turn a crash report into names.</td>
+  </tr>
+</table>
+
+</details>
+
+<details>
+<summary><b>🍎 A proper Mac app</b>: macOS 26 look, menu bar battery, launch at login, three icons</summary>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">🧩 <b>Feels like macOS 26.</b> It sits in the Liquid Glass popover, made of Apple's own controls.</td>
+    <td width="50%" valign="top">🌓 <b>Follows your settings.</b> Dark Mode, Reduce Transparency and Increase Contrast all work.</td>
+  </tr>
+  <tr>
+    <td valign="top">💯 <b>Battery in the menu bar.</b> Show the percentage by the icon, or hide the icon instead.</td>
+    <td valign="top">🚀 <b>Launch at login.</b> Turn it on once in Settings, and it is there after every restart.</td>
+  </tr>
+  <tr>
+    <td valign="top">🎨 <b>Three app icons.</b> Starfield, Sleepy or Ghost, shown wherever macOS shows the app.</td>
+    <td valign="top">⌨️ <b>Keyboard.</b> <code>⌘,</code> opens Settings, <code>⌘W</code> closes it, and <code>⌘Q</code> quits the app.</td>
+  </tr>
+</table>
+
+</details>
+
+**What's not here:** firmware updates, Sound Check, Sound Personalization, Sound Zones, Find Headphones and the multipoint switch. They need a Sennheiser account, your location or Sennheiser's servers, so keep Smart Control Plus for those.
+
 > [!CAUTION]
-> **Unofficial, reverse-engineered, and not notarised.** Use it at your own risk.
->
-> - **Unofficial:** not made, endorsed or supported by Sennheiser or Sonova.
-> - **Reverse-engineered:** the headphones' control protocol is undocumented. Every command comes from community captures, and a firmware update can change what one does.
-> - **Hazardous ids:** some ids reset the link, power the headphones off or erase pairings. The app sends only commands on its allow-list. If you change it, never send anything in `0x06xx` but the battery read: `0x0605` with an empty payload powered them off three times. See [Protocol notes](#protocol-notes).
-> - **Not notarised:** the app is ad hoc signed, not signed by an Apple developer or checked by Apple, so macOS blocks its first launch. [Download](#download) says how to verify a release and open it.
+> **Unofficial and reverse-engineered.** Use it at your own risk. Not made, endorsed or supported by Sennheiser or Sonova. The control protocol is undocumented, every command comes from community captures, and a firmware update can change what one does.
 
 ## Download
 
-[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation, a SHA-256 file and a dSYM zip for [crash reports](#crash-reports). Needs macOS 26 on Apple silicon.
-
-Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
+[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation, a SHA-256 file and a dSYM zip for reading crash reports ([For developers](#for-developers)). Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
 
 ```sh
 gh attestation verify MomentumMenu-*.dmg -R agrmohit/momentum-menu
+gh release verify-asset MomentumMenu-*.dmg -R agrmohit/momentum-menu
 ```
+
+The first checks the build provenance; the second checks the file belongs to the latest release. Name a tag before the file to check an older one.
 
 The app is ad hoc signed, not notarised, so macOS blocks its first launch whatever the attestation says. Open it once, then choose **Open Anyway** in System Settings > Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/MomentumMenu.app`.
 
-## Crash reports
+Left click the menu bar icon for the popover, right click for Settings, Refresh, Disconnect and Quit.
+
+## For developers
+
+<details>
+<summary><b>Build and run</b></summary>
+
+Needs macOS 26 and Xcode 26 (the Command Line Tools lack the SwiftUI macro plugin and XCTest).
+
+```sh
+make install    # builds, signs ad hoc, installs to ~/Applications
+make check      # clean build with warnings as errors, then the tests; what CI runs
+make            # every target and variable
+```
+
+- The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
+- For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
+- The app sets the chosen app icon again at launch, since an install replaces it. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
+- Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.
+- The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
+- A release is a `v*` tag on a commit whose `build.sh` version matches and which has `docs/releases/<tag>.md`. CI runs first, then the release workflow builds, attests and publishes the DMG.
+
+</details>
+
+<details>
+<summary><b>Crash reports</b></summary>
 
 If the app crashes, macOS saves a report as `~/Library/Logs/DiagnosticReports/MomentumMenu-<date>.ips`; Console > Crash Reports shows the same list. Attach it to an [issue](https://github.com/agrmohit/momentum-menu/issues).
 
@@ -75,26 +178,10 @@ The released binary is stripped, so a report shows the app's frames as addresses
 > [!NOTE]
 > On a Mac that has built the app, Spotlight indexes the local `build/MomentumMenu.dSYM`, so `atos` can name frames without being given the right dSYM. To see which symbols are really in use, run `lldb <binary>` and then `image list -S MomentumMenu`.
 
-## Build and run
+</details>
 
-Needs macOS 26 and Xcode 26 (the Command Line Tools lack the SwiftUI macro plugin and XCTest).
-
-```sh
-make install    # builds, signs ad hoc, installs to ~/Applications
-make check      # clean build with warnings as errors, then the tests; what CI runs
-make            # every target and variable
-```
-
-- The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
-- Left click for the popover. Right click for Settings, Refresh, Disconnect and Quit.
-- The line under the battery opens the paired devices, to connect or disconnect one. Right-click a device that is not connected to forget it. Settings sets each device's icon.
-- For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
-- Settings > App Icon picks Starfield (bundled), Sleepy or Ghost, and the app sets the choice again at launch. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
-- Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.
-- The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
-- A release is a `v*` tag on a commit whose `build.sh` version matches and which has `docs/releases/<tag>.md`. CI runs first, then the release workflow builds, attests and publishes the DMG.
-
-## Protocol notes
+<details>
+<summary><b>Protocol notes</b></summary>
 
 GAIA v3 frames start `FF 03 00 LL`, then the vendor (`0x0495`) and the command id. The feature is `command >> 9`.
 
@@ -111,11 +198,13 @@ GAIA v3 frames start `FF 03 00 LL`, then the vendor (`0x0495`) and the command i
 Safety lives in [`Commands.swift`](Sources/M4Core/Gaia/Commands.swift):
 
 - An allow-list of every id the app sends, with exact payload rules. Anything else is refused before it reaches the radio.
-- A deny-list underneath: `0x0607`, `0x0613` and `0x0685` drop the link. `0x0801`, `0x0805` and `0x0817` are setters the app does not use.
+- A deny-list underneath: `0x0607`, `0x0613` and `0x0685` drop the link. `0x0801`, `0x0805` and `0x0817` are setters the app does not use. Never send anything in `0x06xx` but the battery read: `0x0605` with an empty payload powered the headphones off three times.
 - `0x1403` disconnects a paired device on firmware 3.38.3 but erased a pairing on 2.13.42. The pairing commands can change meaning between firmware versions, so `0x1403` and `0x1405` are sent only on 3.38.3, the version they were tested on.
 - `0x1405` forgets one paired device that is not connected. On 3.38.3 it answers `00` and leaves an empty slot that answers `FF FF FF 00` and drops out of the count; a restart closes the gap. The list is re-read until the name is gone. `0x1406` deletes every pairing and is never sent.
 - Frames for any vendor other than `0x0495` are refused.
 - Never sweep id ranges against real headphones.
+
+</details>
 
 ## Credits
 
