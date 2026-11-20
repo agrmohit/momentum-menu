@@ -87,7 +87,7 @@ make            # every target and variable
 
 - The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
 - Left click for the popover. Right click for Settings, Refresh, Disconnect and Quit.
-- The line under the battery opens the paired devices, to connect or disconnect one. Settings sets each device's icon.
+- The line under the battery opens the paired devices, to connect or disconnect one. Right-click a device that is not connected to forget it. Settings sets each device's icon.
 - For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
 - Settings > App Icon picks Starfield (bundled), Sleepy or Ghost, and the app sets the choice again at launch. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
 - Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.

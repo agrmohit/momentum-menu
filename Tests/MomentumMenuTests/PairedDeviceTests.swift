@@ -624,6 +624,70 @@ final class PairedDeviceTests: XCTestCase {
         }
     }
 
+    // MARK: - What each row may offer
+
+    private struct RuleRow {
+        let name: String
+        let device: PairedDevice
+        var firmware: [Int]? = [3, 38, 3]
+        var busy = false
+        var slotsFull = false
+        let connect: Bool
+        let disconnect: Bool
+        let forget: Bool
+    }
+
+    private static let phoneOff = PairedDevice(index: 1, name: "iPhone", isConnected: false, isThisMac: false)
+    private static let phoneOn = PairedDevice(index: 1, name: "iPhone", isConnected: true, isThisMac: false)
+    private static let mac = PairedDevice(index: 0, name: "MacBook", isConnected: true, isThisMac: true)
+
+    private static let ruleRows: [RuleRow] = [
+        RuleRow(name: "idle phone", device: phoneOff, connect: true, disconnect: false, forget: true),
+        RuleRow(name: "connected phone", device: phoneOn, connect: false, disconnect: true, forget: false),
+        RuleRow(name: "this Mac", device: mac, connect: false, disconnect: true, forget: false),
+        RuleRow(name: "idle phone, slots full", device: phoneOff, slotsFull: true,
+                connect: false, disconnect: false, forget: true),
+        RuleRow(name: "idle phone, busy", device: phoneOff, busy: true, connect: false, disconnect: false, forget: false),
+        RuleRow(name: "connected phone, busy", device: phoneOn, busy: true,
+                connect: false, disconnect: false, forget: false),
+        RuleRow(name: "this Mac, busy", device: mac, busy: true, connect: false, disconnect: false, forget: false),
+        RuleRow(name: "idle phone, untested firmware", device: phoneOff, firmware: [3, 38, 4],
+                connect: true, disconnect: false, forget: false),
+        RuleRow(name: "connected phone, untested firmware", device: phoneOn, firmware: [3, 40, 0],
+                connect: false, disconnect: false, forget: false),
+        // The hand-over keeps the pairing, so it needs no firmware.
+        RuleRow(name: "this Mac, firmware unknown", device: mac, firmware: nil,
+                connect: false, disconnect: true, forget: false),
+    ]
+
+    private static func state(for row: RuleRow) -> DeviceState {
+        var state = DeviceState()
+        state.firmwareVersion = row.firmware
+        state.pairedDevices = row.slotsFull ? [mac, PairedDevice(index: 2, name: "iPad", isConnected: true,
+                                                                 isThisMac: false), phoneOff] : [mac, phoneOff]
+        state.maxConnections = 2
+        state.pairedAction = row.busy ? .connecting("iPad") : nil
+        return state
+    }
+
+    func testConnectIsOfferedOnlyWhenTheControllerWouldAct() {
+        for row in Self.ruleRows {
+            XCTAssertEqual(Self.state(for: row).canConnect(row.device), row.connect, row.name)
+        }
+    }
+
+    func testDisconnectIsOfferedOnlyWhenTheControllerWouldAct() {
+        for row in Self.ruleRows {
+            XCTAssertEqual(Self.state(for: row).canDisconnect(row.device), row.disconnect, row.name)
+        }
+    }
+
+    func testForgetIsOfferedOnlyWhenTheControllerWouldAct() {
+        for row in Self.ruleRows {
+            XCTAssertEqual(Self.state(for: row).canForget(row.device), row.forget, row.name)
+        }
+    }
+
     private struct DisconnectRow {
         let name: String
         var paired: [(name: String, connected: Bool)] = [("MacBook", true), ("iPhone", true)]

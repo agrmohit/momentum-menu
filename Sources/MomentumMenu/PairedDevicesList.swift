@@ -3,10 +3,14 @@ import SwiftUI
 
 /// The headphones' paired devices, opened from the line under the battery.
 /// Each one not yet connected gets a Connect button while a slot is free.
+/// Right-click offers Forget, confirmed in the row: an alert would take
+/// focus and close the popover.
 struct PairedDevicesList: View {
     @ObservedObject var controller: HeadphoneController
     let devices: [PairedDevice]
     @ObservedObject private var preferences = Preferences.shared
+    /// Awaiting a yes. Compared whole, so a re-read that changes it closes it.
+    @State private var confirmingForget: PairedDevice?
 
     private var state: DeviceState { controller.state }
 
@@ -14,7 +18,12 @@ struct PairedDevicesList: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(devices.enumerated()), id: \.element.id) { offset, device in
                 if offset > 0 { Divider() }
-                row(device)
+                let name = preferences.displayName(device.name, among: devices)
+                if confirmingForget == device {
+                    forgetConfirmation(device, name: name)
+                } else {
+                    row(device, name: name)
+                }
             }
             if state.connectionSlotsFull, devices.contains(where: { !$0.isConnected }) {
                 Divider()
@@ -31,9 +40,8 @@ struct PairedDevicesList: View {
         .tile(padding: 11)
     }
 
-    private func row(_ device: PairedDevice) -> some View {
+    private func row(_ device: PairedDevice, name: String) -> some View {
         HStack(spacing: 10) {
-            let name = preferences.displayName(device.name, among: devices)
             Image(systemName: preferences.displayKind(device.name, among: devices).symbol)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
@@ -44,17 +52,16 @@ struct PairedDevicesList: View {
             if state.pairedAction?.deviceName == device.name {
                 ProgressView().controlSize(.small)
             } else if device.isConnected {
-                // Other devices can only be let go on firmware that keeps
-                // their pairing; this Mac can always hand over.
-                let canDisconnect = device.isThisMac || state.canChangePairings
                 StatusPill(label: device.isThisMac ? "This Mac" : "Connected",
                            device: name,
-                           canDisconnect: canDisconnect && state.pairedAction == nil) {
+                           canDisconnect: state.canDisconnect(device)) {
                     Task { await controller.disconnect(device) }
                 }
-                .help(canDisconnect ? "Disconnect" : "This firmware can't disconnect it from here")
+                // This Mac can always hand over; others need the tested firmware.
+                .help(device.isThisMac || state.canChangePairings
+                      ? "Disconnect" : "This firmware can't disconnect it from here")
             } else {
-                let canConnect = !state.connectionSlotsFull && state.pairedAction == nil
+                let canConnect = state.canConnect(device)
                 Button("Connect") {
                     Task { await controller.connect(to: device) }
                 }
@@ -64,6 +71,56 @@ struct PairedDevicesList: View {
             }
         }
         .padding(.vertical, 6)
+        .contentShape(.rect)
+        .contextMenu { menu(device, name: name) }
+    }
+
+    /// The row's pill action, then Forget.
+    @ViewBuilder
+    private func menu(_ device: PairedDevice, name: String) -> some View {
+        if device.isConnected {
+            Button("Disconnect") { Task { await controller.disconnect(device) } }
+                .disabled(!state.canDisconnect(device))
+        } else {
+            Button("Connect") { Task { await controller.connect(to: device) } }
+                .disabled(!state.canConnect(device))
+        }
+        Divider()
+        Button("Forget \u{201C}\(name)\u{201D}\u{2026}", role: .destructive) { confirmingForget = device }
+            .disabled(!state.canForget(device))
+    }
+
+    /// Replaces the row until answered. Forget closes it at once, so the
+    /// row's spinner shows while the controller works.
+    private func forgetConfirmation(_ device: PairedDevice, name: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Forget \u{201C}\(name)\u{201D}?")
+                .font(.callout.weight(.semibold))
+            Text("The headphones will no longer know it. To use them on \(name) again, pair from scratch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Spacer()
+                Button("Cancel") { confirmingForget = nil }
+                    .buttonStyle(PillStyle(colour: .secondary))
+                    .keyboardShortcut(.cancelAction)
+                Button("Forget") {
+                    confirmingForget = nil
+                    Task {
+                        if await controller.forget(device) { preferences.forgetKind(of: device.name) }
+                    }
+                }
+                .buttonStyle(PillStyle(colour: .red))
+                .disabled(!state.canForget(device))
+                .accessibilityLabel("Forget \(name)")
+            }
+            .padding(.top, 6)
+        }
+        .padding(8)
+        .background(Color.red.opacity(0.12), in: .rect(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, -6)
+        .padding(.vertical, 4)
     }
 }
 

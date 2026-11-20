@@ -299,6 +299,20 @@ public struct DeviceState: Sendable {
 
     static let testedPairingFirmware = [3, 38, 3]
 
+    /// Whether each paired-device action may start now, for the menu and
+    /// the row pills. The controller makes its own checks on a fresh list.
+    public func canConnect(_ device: PairedDevice) -> Bool {
+        pairedAction == nil && !device.isConnected && !connectionSlotsFull
+    }
+
+    public func canDisconnect(_ device: PairedDevice) -> Bool {
+        pairedAction == nil && device.isConnected && (device.isThisMac || canChangePairings)
+    }
+
+    public func canForget(_ device: PairedDevice) -> Bool {
+        pairedAction == nil && !device.isConnected && canChangePairings
+    }
+
     /// True when the device is running firmware old enough to lack the
     /// equaliser entirely.
     public var needsFirmwareUpdateForEq: Bool {
