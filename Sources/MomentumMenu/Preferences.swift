@@ -65,6 +65,12 @@ final class Preferences: ObservableObject {
         deviceKinds[name] ?? .guess(from: name)
     }
 
+    /// Drops the choice once the headphones forget the device, so a new
+    /// pairing that reuses the name starts from the guess.
+    func forgetKind(of name: String) {
+        deviceKinds[name] = nil
+    }
+
     /// Stock names in place of real ones, for screenshots. Set with
     /// `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` and
     /// read at launch; no Settings row, so it is not left on by accident.
