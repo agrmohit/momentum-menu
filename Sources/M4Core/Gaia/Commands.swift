@@ -123,7 +123,7 @@ enum Cmd {
     /// Devices are addressed by a 0-based index alone; there is no address.
     /// Indexes can reorder when a device reconnects, so a name read with the
     /// index is checked again before acting on it. Every layout below is
-    /// from momentum4-control's captures on FW 3.37.3 and 3.38.3.
+    /// from Ariazonaa/momentum-control's captures on FW 3.37.3 and 3.38.3.
     ///
     /// -> [] ; <- count as u16 BE
     static let getPairedDeviceCount: UInt16 = 0x1400
@@ -156,9 +156,9 @@ enum CommandSafety {
     /// cycle. Two independent sweeps died here.
     static let bricksLink: Set<UInt16> = [0x0607, 0x0613, 0x0685]
 
-    /// Setters for voice prompts, sidetone and low latency (momentum4-control
-    /// catalogue). Only the prompts write is verified there; the app sends
-    /// none of them.
+    /// Setters for voice prompts, sidetone and low latency
+    /// (Ariazonaa/momentum-control catalogue). Only the prompts write is
+    /// verified there; the app sends none of them.
     static let untestedWrites: Set<UInt16> = [0x0801, 0x0805, 0x0817]
 
     /// The 0x06xx group is power/system space and is known to reset the link
