@@ -30,9 +30,9 @@ if CommandLine.arguments.contains("--try-rfcomm") {
     RunLoop.main.run()
 }
 
-// Connects and prints every frame the headphones send, so unsolicited pushes
-// (charging, on-head detection) can be seen. Sends nothing but the connect
-// handshake.
+// Connects and prints every frame sent and received, so unsolicited pushes
+// (charging, on-head detection) can be seen. Sends only what connecting
+// sends: the handshake and the first reads.
 if let index = CommandLine.arguments.firstIndex(of: "--listen") {
     let seconds = Double(CommandLine.arguments.dropFirst(index + 1).first ?? "") ?? 45
     Task { @MainActor in

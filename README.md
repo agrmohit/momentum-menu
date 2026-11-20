@@ -90,6 +90,7 @@ make            # every target and variable
 - The line under the battery opens the paired devices, to connect or disconnect one. Settings sets each device's icon.
 - For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
 - Settings > App Icon picks Starfield (bundled), Sleepy or Ghost, and the app sets the choice again at launch. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
+- Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.
 - The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
 - A release is a `v*` tag on a commit whose `build.sh` version matches and which has `docs/releases/<tag>.md`. CI runs first, then the release workflow builds, attests and publishes the DMG.
 
