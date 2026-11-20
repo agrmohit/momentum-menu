@@ -323,7 +323,7 @@ public final class HeadphoneController: ObservableObject {
 
     @Published public private(set) var state = DeviceState()
 
-    /// Every frame the device sends, for diagnostics. Set before connecting.
+    /// Every frame sent and received, for diagnostics. Set before connecting.
     public var frameLogger: ((String) -> Void)?
 
     private let transport: GaiaTransport
@@ -1177,7 +1177,9 @@ public final class HeadphoneController: ObservableObject {
         return try await withCheckedThrowingContinuation { continuation in
             inFlight[command] = (sequence, continuation)
             do {
-                try transport.send(GaiaFrame(command: command, payload: payload))
+                let frame = GaiaFrame(command: command, payload: payload)
+                try transport.send(frame)
+                log(frame, sent: true)
             } catch {
                 // A reply or a disconnect delivered during `send` may already
                 // have resumed this caller. Resuming twice traps.
@@ -1198,14 +1200,18 @@ public final class HeadphoneController: ObservableObject {
         }
     }
 
-    private func log(_ frame: GaiaFrame) {
+    private func log(_ frame: GaiaFrame, sent: Bool = false) {
         guard let frameLogger else { return }
         let kind: String
-        switch frame.responseKind {
-        case .success: kind = "ok      "
-        case .error: kind = "error   "
-        case .notification: kind = "NOTIFY  "
-        case nil: kind = "unsolicited"
+        if sent {
+            kind = "sent    "
+        } else {
+            switch frame.responseKind {
+            case .success: kind = "ok      "
+            case .error: kind = "error   "
+            case .notification: kind = "NOTIFY  "
+            case nil: kind = "unsolicited"
+            }
         }
         let hex = frame.payload.map { String(format: "%02X", $0) }.joined(separator: " ")
         frameLogger(String(format: "0x%04X  %@  base=0x%04X  [%@]",

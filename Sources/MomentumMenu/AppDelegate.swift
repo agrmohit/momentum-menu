@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import M4Core
+import os
 import SwiftUI
 
 @MainActor
@@ -28,7 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var connectingTimer: Timer?
     private var connectingPhase: Double = 0
 
+    /// Every GAIA frame at debug level, which macOS does not keep: watch it
+    /// with `log stream --level debug`. Public, as a redacted frame is no use.
+    private static let frames = Logger(subsystem: "com.agrmohit.momentummenu", category: "gaia")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        controller.frameLogger = { Self.frames.debug("\($0, privacy: .public)") }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = StatusIcon.image(batteryPercent: nil, connected: false)
         statusItem.button?.imagePosition = .imageOnly
