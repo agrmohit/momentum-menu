@@ -229,7 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func showContextMenu() {
         if popover.isShown { popover.performClose(nil) }
-        let menu = Self.contextMenu(target: self, connected: controller.state.connected)
+        let menu = Self.contextMenu(target: self, connected: controller.state.connected,
+                                    checkingForUpdates: UpdatePrompt.shared.checking)
 
         // Attaching the menu and clicking the button is what positions it under
         // the status item; it is detached again so the next left click still
@@ -242,11 +243,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// The right-click menu, built fresh on each click from the state now.
     /// Auto-enabling is off: with it on, AppKit ignores `isEnabled` and
     /// enables every item whose target answers its action.
-    static func contextMenu(target: AnyObject, connected: Bool) -> NSMenu {
+    static func contextMenu(target: AnyObject, connected: Bool, checkingForUpdates: Bool) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(item("Settings…", symbol: "gearshape", target: target,
                           action: #selector(openSettingsItem), key: ","))
+        let update = item(checkingForUpdates ? "Checking for Updates…" : "Check for Updates…",
+                          symbol: "arrow.down.circle", target: target, action: #selector(checkForUpdatesItem))
+        update.isEnabled = !checkingForUpdates
+        menu.addItem(update)
 
         menu.addItem(.separator())
         let refresh = item("Refresh", symbol: "arrow.clockwise", target: target, action: #selector(refreshItem))
@@ -291,6 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func openSettingsItem() { openSettings() }
+
+    @objc private func checkForUpdatesItem() { UpdatePrompt.shared.check() }
 
     @objc private func refreshItem() { Task { await controller.refresh() } }
 

@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var controller: HeadphoneController
+    @ObservedObject private var updates = UpdatePrompt.shared
 
     /// The headphones' devices in their order, then any named earlier that
     /// are not in the list now, so a choice can still be undone.
@@ -98,6 +99,21 @@ struct SettingsView: View {
                         Text("Momentum Menu")
                         Text("Unofficial. Not affiliated with Sennheiser or Sonova.")
                     } icon: { Badge("headphones.over.ear", .indigo) }
+                }
+                LabeledContent {
+                    if updates.checking {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Checking…").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button("Check for Updates") { updates.check() }
+                    }
+                } label: {
+                    Label {
+                        Text("Updates")
+                        Text("Asks GitHub for the latest version, only when you press the button.")
+                    } icon: { Badge("arrow.down.circle", .gray) }
                 }
                 Link(destination: Preferences.repository) {
                     Label { Text("github.com/agrmohit/momentum-menu") } icon: { Badge("link", .gray) }
