@@ -1,5 +1,6 @@
-// The app icons, drawn as SVG on a 1024 grid. render.html draws one; render.sh
-// renders every size and packs them into the .icns files build.sh bundles.
+// The app icons and the DMG's art, drawn as SVG. render.html draws one;
+// render.sh renders every size and packs them into the .icns files build.sh
+// bundles, and the DMG's volume icon and background.
 //
 // Each icon has two arts: "large" for 128 pt and up, and "small", hand-tuned
 // for 16 and 32 pt, where the large art's detail turns to mush.
@@ -53,7 +54,8 @@ function muff(cx, cy, fill, { core = 100, lobes = 10, lobeR = 44, spread = 98, s
 const muffGradient = (id, cx, cy, light, dark) =>
   `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${cx - 60}" cy="${cy - 70}" r="230"><stop offset="0" stop-color="${light}"/><stop offset=".7" stop-color="${light}"/><stop offset="1" stop-color="${dark}"/></radialGradient>`;
 const SMALL_MUFF = { core: 120, lobes: 7, lobeR: 68, spread: 110, shadow: false };
-// The large art's headphones: one band, two muffs.
+// The large art's headphones: one band, two muffs. The volume icon engraves
+// the same shape, so it cannot drift from the app icon.
 const headphones = (bandPaint, left, right = left, muffOptions = {}) =>
   band(212, 610, 38, bandPaint) + muff(300, 670, left, muffOptions) + muff(724, 670, right, muffOptions);
 const zee = (x, y, s, c) =>
@@ -165,5 +167,63 @@ function iconSVG(id, art, shape) {
   <g clip-path="url(#tile)"><g transform="${body.scale}">${icon[art]()}</g></g>
   ${icon.flat ? "" : `<rect ${tile} fill="url(#sheen)"/>`}
   ${shape === "squircle" ? `<rect x="103" y="103" width="818" height="818" rx="182" fill="none" stroke="url(#rim)" stroke-width="6"/>` : ""}
+</svg>`;
+}
+
+/// The DMG's volume icon: Finder's disk-image drive, its arrow swapped for
+/// the app icon's headphones, engraved in grey. Drawn, not copied: Apple's
+/// own drive art is not ours to ship.
+function volumeSVG() {
+  const glyph = paint => headphones(paint, paint, paint, { shadow: false });
+  // One outline for the slab and its lip: round top corners, and bottom
+  // corners as round as the lip's ends so the lip never sticks out.
+  const body = "M210 73 H814 A58 58 0 0 1 872 131 V896 A54 54 0 0 1 818 950 H206 A54 54 0 0 1 152 896 V131 A58 58 0 0 1 210 73 Z";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <defs>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b4b4b8"/><stop offset=".04" stop-color="#d8d8db"/><stop offset=".1" stop-color="#ececee"/>
+      <stop offset=".9" stop-color="#ececee"/><stop offset=".96" stop-color="#d8d8db"/><stop offset="1" stop-color="#b4b4b8"/></linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".12" stop-color="#fff" stop-opacity="0"/>
+      <stop offset=".85" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".06"/></linearGradient>
+    <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d3d3d6"/><stop offset="1" stop-color="#b8b8bc"/></linearGradient>
+    <radialGradient id="led" cx=".45" cy=".4" r=".6"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#dcdce0"/></radialGradient>
+    <!-- The seam shows along the lip's top half, round its ends too. -->
+    <clipPath id="seam"><rect x="140" y="836" width="744" height="60"/></clipPath>
+    <filter id="drop" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-opacity=".3"/></filter>
+    <filter id="blur"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <g filter="url(#drop)">
+    <path d="${body}" fill="url(#side)"/>
+    <path d="${body}" fill="url(#top)"/>
+    <rect x="152" y="842" width="720" height="108" rx="54" fill="url(#lip)"/>
+    <g clip-path="url(#seam)" fill="none">
+      <rect x="153" y="843" width="718" height="106" rx="53" stroke="#7d7d82" stroke-width="2.5"/>
+      <rect x="155" y="846" width="714" height="101" rx="50.5" stroke="#fff" stroke-width="2" opacity=".6"/>
+    </g>
+    <ellipse cx="792" cy="902" rx="22" ry="15" fill="#8e8e93" opacity=".55"/>
+    <ellipse cx="792" cy="896" rx="22" ry="15" fill="url(#led)"/>
+  </g>
+  <g transform="translate(512 455) scale(.62) translate(-512 -540)">
+    <g transform="translate(0 6)" opacity=".9" filter="url(#blur)">${glyph("#fff")}</g>
+    <g transform="translate(0 -4)" opacity=".18" filter="url(#blur)">${glyph("#000")}</g>
+    ${glyph("#bcbcbe")}
+  </g>
+</svg>`;
+}
+
+/// The DMG window's background: a light lavender (Finder draws icon labels
+/// in black, even in Dark Mode) with an arrow from the app to Applications.
+/// `layout`: Resources/DMG/layout.json's sizes and icon centres, in points.
+function dmgBackgroundSVG(layout) {
+  const from = layout.appX + 102, to = layout.applicationsX - 102, y = layout.iconY - 32;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="100%" height="100%">
+  <defs><linearGradient id="wash" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f2fb"/><stop offset="1" stop-color="#e9e6f7"/></linearGradient></defs>
+  <rect width="${layout.width}" height="${layout.height}" fill="url(#wash)"/>
+  <g fill="none" stroke="#7b6fc4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M${from} ${y} C ${from + 38} ${y - 44}, ${to - 36} ${y - 44}, ${to} ${y}"/>
+    <path d="M${to - 17} ${y - 4} L${to + 2} ${y + 3} L${to - 1} ${y - 17}"/>
+  </g>
 </svg>`;
 }

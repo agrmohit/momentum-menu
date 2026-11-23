@@ -47,20 +47,17 @@ build: ## Build build/MomentumMenu.app
 install: ## Build and install to ~/Applications
 	./build.sh $(CONFIG) install
 
-# The app sits beside an Applications link to drag it onto. ULMO (LZMA) is
-# about a quarter smaller than UDZO; macOS 14 and later mount it. The bundle
-# is removed after: two copies with one id confuse Launch Services. A release
-# build's dSYM is zipped beside the DMG; a later rebuild may not match its
-# UUID. build.sh writes no dSYM for other configurations.
+# pack-dmg.sh lays the app out beside an Applications link, with the
+# committed background and volume icon. The bundle is removed after: two
+# copies with one id confuse Launch Services. A release build's dSYM is
+# zipped beside the DMG; a later rebuild may not match its UUID. build.sh
+# writes no dSYM for other configurations.
 dmg: build ## Pack the app into build/MomentumMenu-<version>.dmg with a .sha256, plus a dSYM zip for release
-	rm -rf build/dmg "$(DMG)" "$(DMG).sha256" "$(DSYM_ZIP)"
+	rm -rf "$(DMG)" "$(DMG).sha256" "$(DSYM_ZIP)"
 	if [ "$(CONFIG)" = release ]; then ditto -c -k --keepParent build/MomentumMenu.dSYM "$(DSYM_ZIP)"; fi
-	mkdir -p build/dmg
-	cp -R build/MomentumMenu.app build/dmg/
-	ln -s /Applications build/dmg/Applications
-	hdiutil create -volname "Momentum Menu" -srcfolder build/dmg -format ULMO -ov "$(DMG)"
+	Resources/DMG/pack-dmg.sh build/MomentumMenu.app "$(DMG)"
 	cd build && shasum -a 256 "$(notdir $(DMG))" > "$(notdir $(DMG)).sha256"
-	rm -rf build/dmg build/MomentumMenu.app
+	rm -rf build/MomentumMenu.app
 	@echo "Packed $(DMG)"
 
 # A tag on a commit whose build.sh says another version would ship an app
@@ -74,7 +71,7 @@ release-check: ## Check TAG matches build.sh's version and has release notes
 snapshots: ## Render the popover and Settings to PNGs without Bluetooth
 	SNAPSHOT_DIR="$(abspath $(SNAPSHOT_DIR))" swift test --filter SnapshotRender
 
-icons: ## Redraw the app icons (needs Google Chrome and oxipng)
+icons: ## Redraw the app icons and the DMG art (needs Google Chrome, oxipng and uv)
 	Resources/AppIcon/render.sh
 
 clean: ## Remove SwiftPM and build output

@@ -6,3 +6,7 @@ build/
 xcuserdata/
 Package.resolved
 dist/
+
+# Tool caches
+.ruff_cache/
+__pycache__/

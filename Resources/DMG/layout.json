@@ -1,0 +1,7 @@
+{
+  "volume": "Momentum Menu",
+  "width": 660,
+  "height": 400,
+  "app": { "name": "MomentumMenu.app", "x": 170, "y": 190 },
+  "applications": { "x": 490, "y": 190 }
+}

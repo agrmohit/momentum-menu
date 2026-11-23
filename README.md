@@ -154,6 +154,7 @@ make            # every target and variable
 - The ad hoc signature changes on every build, so macOS may ask for Bluetooth permission again after an install.
 - For screenshots, `defaults write com.agrmohit.momentummenu demoDeviceNames -bool YES` shows stock device names until `defaults delete` and a relaunch.
 - The app sets the chosen app icon again at launch, since an install replaces it. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
+- `make icons` redraws the app icons from `Resources/AppIcon/artwork.js`, and the DMG's volume icon, background and window layout from that and `Resources/DMG/layout.json` (needs Chrome, oxipng and uv). With the same Chrome and macOS, every run is byte-identical; commit what it writes.
 - Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.
 - The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
 - After a firmware update, Disconnect and Forget for other devices stay off until the new version is tested: [Re-testing pairing commands on new firmware](docs/firmware-retest.md).
