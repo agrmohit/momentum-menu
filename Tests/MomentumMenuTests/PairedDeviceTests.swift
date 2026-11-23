@@ -602,6 +602,31 @@ final class PairedDeviceTests: XCTestCase {
         }
     }
 
+    func testTheCaptionNamesOnlyAnUntestedFirmwareThatMatters() {
+        let phone = PairedDevice(index: 1, name: "iPhone", isConnected: false, isThisMac: false)
+        let mac = PairedDevice(index: 0, name: "MacBook", isConnected: true, isThisMac: true)
+        let macUnknown = PairedDevice(index: 0, name: "MacBook", isConnected: true, isThisMac: false)
+        let rows: [(String, [Int]?, [PairedDevice]?, String?)] = [
+            ("untested, phone idle", [3, 39, 0], [mac, phone], "3.39.0"),
+            ("untested, phone connected", [3, 39, 0],
+             [mac, PairedDevice(index: 1, name: "iPhone", isConnected: true, isThisMac: false)], "3.39.0"),
+            ("older untested", [3, 37, 3], [mac, phone], "3.37.3"),
+            ("untested, this Mac not identified", [4, 0, 0], [macUnknown], "4.0.0"),
+            ("tested", [3, 38, 3], [mac, phone], nil),
+            ("untested, only this Mac", [3, 39, 0], [mac], nil),
+            ("untested, empty list", [3, 39, 0], [], nil),
+            ("untested, list unknown", [3, 39, 0], nil, nil),
+            ("firmware not read yet", nil, [mac, phone], nil),
+        ]
+        for (name, version, devices, caption) in rows {
+            var state = DeviceState()
+            state.firmwareVersion = version
+            state.firmware = version?.map(String.init).joined(separator: ".")
+            state.pairedDevices = devices
+            XCTAssertEqual(state.untestedPairingFirmware, caption, name)
+        }
+    }
+
     /// The firmware rule holds at the one place every frame passes, not
     /// only in `disconnect(_:)`: a direct request is refused too.
     func testARawPairingChangeIsRefusedOffTheTestedFirmware() async {

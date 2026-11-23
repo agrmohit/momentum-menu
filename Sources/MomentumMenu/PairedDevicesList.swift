@@ -26,18 +26,27 @@ struct PairedDevicesList: View {
                 }
             }
             if state.connectionSlotsFull, devices.contains(where: { !$0.isConnected }) {
-                Divider()
-                Text("\(state.maxConnections ?? 2) of \(state.maxConnections ?? 2) devices connected. "
-                     + (state.canChangePairings
-                        ? "Disconnect one to connect another."
-                        : "Disconnect one on that device to connect another."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 7)
+                caption("\(state.maxConnections ?? 2) of \(state.maxConnections ?? 2) devices connected. "
+                        + (state.canChangePairings
+                           ? "Disconnect one to connect another."
+                           : "Disconnect one on that device to connect another."))
+            }
+            if let firmware = state.untestedPairingFirmware {
+                caption("Firmware \(firmware) isn't tested yet, so Forget and Disconnect for other devices are not available.")
             }
         }
         .tile(padding: 11)
+    }
+
+    /// A grey note under the rows, with its own divider above it.
+    @ViewBuilder
+    private func caption(_ text: String) -> some View {
+        Divider()
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 7)
     }
 
     private func row(_ device: PairedDevice, name: String) -> some View {
