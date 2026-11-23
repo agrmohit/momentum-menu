@@ -53,6 +53,9 @@ function muff(cx, cy, fill, { core = 100, lobes = 10, lobeR = 44, spread = 98, s
 const muffGradient = (id, cx, cy, light, dark) =>
   `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${cx - 60}" cy="${cy - 70}" r="230"><stop offset="0" stop-color="${light}"/><stop offset=".7" stop-color="${light}"/><stop offset="1" stop-color="${dark}"/></radialGradient>`;
 const SMALL_MUFF = { core: 120, lobes: 7, lobeR: 68, spread: 110, shadow: false };
+// The large art's headphones: one band, two muffs.
+const headphones = (bandPaint, left, right = left, muffOptions = {}) =>
+  band(212, 610, 38, bandPaint) + muff(300, 670, left, muffOptions) + muff(724, 670, right, muffOptions);
 const zee = (x, y, s, c) =>
   `<path d="M${x} ${y} H${x + s} L${x} ${y + s} H${x + s}" fill="none" stroke="${c}" stroke-width="${Math.max(10, s / 3.6)}" stroke-linecap="round" stroke-linejoin="round"/>`;
 
@@ -110,7 +113,7 @@ const ICONS = {
        <linearGradient id="g1band" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9deff"/><stop offset="1" stop-color="#8f9bff"/></linearGradient>`,
     large: () => stars(7, 70, 7) + `<ellipse cx="512" cy="560" rx="360" ry="300" fill="url(#g1glow)"/>` +
       sparkle(330, 290, 34) + sparkle(712, 240, 24) + sparkle(826, 450, 16, .8) + sparkle(200, 470, 14, .7) +
-      band(212, 610, 38, "url(#g1band)") + muff(300, 670, "url(#g1L)") + muff(724, 670, "url(#g1R)"),
+      headphones("url(#g1band)", "url(#g1L)", "url(#g1R)"),
     small: () => sparkle(330, 300, 70) + sparkle(724, 260, 46) + band(220, 600, 70, "#c4caff") +
       muff(290, 680, "url(#g1Ls)", SMALL_MUFF) + muff(734, 680, "url(#g1Rs)", SMALL_MUFF),
   },
@@ -121,7 +124,7 @@ const ICONS = {
       muffGradient("ycLs", 290, 680, W, "#cfe0fb") + muffGradient("ycRs", 734, 680, W, "#cfe0fb"),
     large: () => `<ellipse cx="260" cy="260" rx="220" ry="140" fill="${W}" opacity=".35" filter="url(#soft)"/>` +
       zee(560, 250, 76, "#4a5bd1") + zee(672, 178, 50, "#6273e0") + zee(748, 136, 32, "#7d8cec") +
-      band(212, 610, 38, "#4a5bd1") + muff(300, 670, "url(#ycL)") + muff(724, 670, "url(#ycR)"),
+      headphones("#4a5bd1", "url(#ycL)", "url(#ycR)"),
     small: () => zee(600, 170, 150, "#4a5bd1") + band(220, 600, 70, "#4a5bd1") +
       muff(290, 680, "url(#ycLs)", SMALL_MUFF) + muff(734, 680, "url(#ycRs)", SMALL_MUFF),
   },
