@@ -299,6 +299,15 @@ public struct DeviceState: Sendable {
 
     static let testedPairingFirmware = [3, 38, 3]
 
+    /// The firmware to name when it is why Forget and Disconnect are off:
+    /// read, untested, and with a device other than this Mac in the list.
+    /// Nil before the firmware is read, so the caption never flashes on connect.
+    public var untestedPairingFirmware: String? {
+        guard let firmware, !canChangePairings,
+              pairedDevices?.contains(where: { !$0.isThisMac }) == true else { return nil }
+        return firmware
+    }
+
     /// Whether each paired-device action may start now, for the menu and
     /// the row pills. The controller makes its own checks on a fresh list.
     public func canConnect(_ device: PairedDevice) -> Bool {
