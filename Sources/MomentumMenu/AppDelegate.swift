@@ -229,26 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func showContextMenu() {
         if popover.isShown { popover.performClose(nil) }
-
-        let menu = NSMenu()
-        menu.addItem(item("Settings…", symbol: "gearshape", action: #selector(openSettingsItem), key: ","))
-
-        menu.addItem(.separator())
-        let refresh = item("Refresh", symbol: "arrow.clockwise", action: #selector(refreshItem))
-        refresh.isEnabled = controller.state.connected
-        menu.addItem(refresh)
-        let disconnect = item("Disconnect", symbol: "power", action: #selector(disconnectItem))
-        disconnect.isEnabled = controller.state.connected
-        disconnect.toolTip = "Free one of the headphones' two connection slots for another device."
-        menu.addItem(disconnect)
-
-        menu.addItem(.separator())
-        // ⌘Q works while this menu is open. Once it closes, ⌘Q belongs to
-        // the app in front again: this menu does not activate the app.
-        let quit = item("Quit Momentum Menu", symbol: "xmark.circle",
-                        action: #selector(NSApplication.terminate(_:)), key: "q")
-        quit.target = NSApp
-        menu.addItem(quit)
+        let menu = Self.contextMenu(target: self, connected: controller.state.connected)
 
         // Attaching the menu and clicking the button is what positions it under
         // the status item; it is detached again so the next left click still
@@ -256,6 +237,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    /// The right-click menu, built fresh on each click from the state now.
+    /// Auto-enabling is off: with it on, AppKit ignores `isEnabled` and
+    /// enables every item whose target answers its action.
+    static func contextMenu(target: AnyObject, connected: Bool) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(item("Settings…", symbol: "gearshape", target: target,
+                          action: #selector(openSettingsItem), key: ","))
+
+        menu.addItem(.separator())
+        let refresh = item("Refresh", symbol: "arrow.clockwise", target: target, action: #selector(refreshItem))
+        refresh.isEnabled = connected
+        menu.addItem(refresh)
+        let disconnect = item("Disconnect", symbol: "power", target: target, action: #selector(disconnectItem))
+        disconnect.isEnabled = connected
+        disconnect.toolTip = "Free one of the headphones' two connection slots for another device."
+        menu.addItem(disconnect)
+
+        menu.addItem(.separator())
+        // ⌘Q works while this menu is open. Once it closes, ⌘Q belongs to
+        // the app in front again: this menu does not activate the app.
+        menu.addItem(item("Quit Momentum Menu", symbol: "xmark.circle", target: NSApp,
+                          action: #selector(NSApplication.terminate(_:)), key: "q"))
+        return menu
     }
 
     /// ⌘W and ⌘Q for the Settings window. A menu bar app shows no menu bar,
@@ -275,10 +282,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.mainMenu = main
     }
 
-    private func item(_ title: String, symbol: String, action: Selector, key: String = "") -> NSMenuItem {
+    private static func item(_ title: String, symbol: String, target: AnyObject?, action: Selector,
+                             key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        item.target = self
+        item.target = target
         return item
     }
 
