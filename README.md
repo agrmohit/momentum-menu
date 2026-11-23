@@ -66,7 +66,7 @@ Everything you would change in Smart Control Plus day to day is here too:
 - **Devices:** the line under the battery lists your paired devices, and Settings picks an icon for each.
 
 <details>
-<summary><b>🛡️ Built to be trusted</b>: allow-list, model check, tested firmware, verified builds</summary>
+<summary><b>🛡️ Built to be trusted</b>: allow-list, model check, tested firmware, verified builds, offline</summary>
 
 <table>
   <tr>
@@ -80,6 +80,10 @@ Everything you would change in Smart Control Plus day to day is here too:
   <tr>
     <td valign="top">🔏 <b>Verified builds.</b> Each DMG is built by GitHub Actions, with an attestation you can check.</td>
     <td valign="top">🧾 <b>Readable crashes.</b> Each release ships the symbols that turn a crash report into names.</td>
+  </tr>
+  <tr>
+    <td valign="top">📴 <b>Offline by design.</b> It talks to your headphones, and to GitHub only when you ask for updates.</td>
+    <td valign="top">👤 <b>No account.</b> No sign-in, no Sennheiser account and no analytics of any kind.</td>
   </tr>
 </table>
 
@@ -112,18 +116,27 @@ Everything you would change in Smart Control Plus day to day is here too:
 
 ## Download
 
-[Releases](https://github.com/agrmohit/momentum-menu/releases) carry a DMG built by GitHub Actions from the tagged commit, with a build provenance attestation, a SHA-256 file and a dSYM zip for reading crash reports ([For developers](#for-developers)). Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
+1. Download the `.dmg` from the [latest release](https://github.com/agrmohit/momentum-menu/releases/latest).
+2. Open it and drag **Momentum Menu** to **Applications**.
+3. Open Momentum Menu. macOS shows **"MomentumMenu.app" Not Opened**. Press **Done**, not the blue button.
+4. Open **System Settings > Privacy & Security** and scroll down to **Security**. Next to **"MomentumMenu.app" was blocked to protect your Mac**, press **Open Anyway**, then confirm with Touch ID or your password.
+5. macOS asks once more: **Open "MomentumMenu.app"?** Press **Open Anyway**. The blue button would move the app to the Bin.
+6. Allow Bluetooth when asked. The app needs it to talk to the headphones.
+
+Steps 3 to 5 are needed once, because the app is ad hoc signed, not notarised by Apple. In Terminal, `xattr -dr com.apple.quarantine /Applications/MomentumMenu.app` does the same.
+
+Left click the menu bar icon for the popover, right click for Settings, Check for Updates, Refresh, Disconnect and Quit.
+
+### Check the download
+
+Each DMG is built by GitHub Actions from the tagged commit, with a build provenance attestation, a SHA-256 file and a dSYM zip for reading crash reports ([For developers](#for-developers)). Every DMG's attestation is listed on the [attestations page](https://github.com/agrmohit/momentum-menu/attestations), with its commit and workflow. To check a download:
 
 ```sh
 gh attestation verify MomentumMenu-*.dmg -R agrmohit/momentum-menu
 gh release verify-asset MomentumMenu-*.dmg -R agrmohit/momentum-menu
 ```
 
-The first checks the build provenance; the second checks the file belongs to the latest release. Name a tag before the file to check an older one.
-
-The app is ad hoc signed, not notarised, so macOS blocks its first launch whatever the attestation says. Open it once, then choose **Open Anyway** in System Settings > Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/MomentumMenu.app`.
-
-Left click the menu bar icon for the popover, right click for Settings, Refresh, Disconnect and Quit.
+The first checks the build provenance; the second checks the file belongs to the latest release. Name a tag before the file to check an older one. Passing both does not skip steps 3 to 5: macOS checks for Apple notarisation, not attestations.
 
 ## For developers
 
@@ -143,6 +156,7 @@ make            # every target and variable
 - The app sets the chosen app icon again at launch, since an install replaces it. A non-default icon adds a Finder attribute that fails `codesign --strict`; the plain check passes.
 - Every GAIA frame goes to the unified log at debug level, which macOS does not keep. Watch it live with `log stream --level debug --predicate 'subsystem == "com.agrmohit.momentummenu"'`.
 - The tests need no hardware. `make test` is the quick incremental run; it shows a file's warnings only when it recompiles that file.
+- After a firmware update, Disconnect and Forget for other devices stay off until the new version is tested: [Re-testing pairing commands on new firmware](docs/firmware-retest.md).
 - A release is a `v*` tag on a commit whose `build.sh` version matches and which has `docs/releases/<tag>.md`. CI runs first, then the release workflow builds, attests and publishes the DMG.
 
 </details>
